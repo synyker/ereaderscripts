@@ -1,8 +1,12 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import ebooklib
+from ebooklib import epub as ebooklib_epub
+
 from articles import Article
-from epub import group_into_sections
+from epub import build_edition, group_into_sections
+from images import ImageCache
 
 NOW = datetime(2026, 8, 5, 12, 0, tzinfo=timezone.utc)
 
@@ -112,3 +116,134 @@ def test_invalid_section_articles_sort_with_other_fallback_articles():
     assert groups[0][0] == "Muut"
     # Sorted newest-first: hours_ago=1 before hours_ago=3
     assert [a.id for a in groups[0][1]] == ["from_true_unmapped", "from_invalid_section"]
+
+
+BUILT_AT = datetime(2026, 8, 5, 8, 17, tzinfo=timezone.utc)
+
+
+def written_article(tmp_path: Path, article_id: str, feed: str, body: str, hours_ago: int = 1) -> Article:
+    path = tmp_path / f"{article_id}.html"
+    path.write_text(f"<html><body><article>{body}</article></body></html>", encoding="utf-8")
+    return Article(
+        id=article_id,
+        url=f"https://example.com/{article_id}",
+        title=f"Title {article_id}",
+        feed=feed,
+        published=NOW - timedelta(hours=hours_ago),
+        path=path,
+    )
+
+
+def test_writes_a_readable_epub(tmp_path: Path):
+    groups = [("Kotimaa", [written_article(tmp_path, "a", "Yle Tuoreimmat", "<p>Body</p>")])]
+    out = tmp_path / "news.epub"
+
+    build_edition(groups, out, built_at=BUILT_AT)
+
+    assert ebooklib_epub.read_epub(str(out)) is not None
+
+
+def test_title_is_the_stable_ascii_name(tmp_path: Path):
+    groups = [("Kotimaa", [written_article(tmp_path, "a", "Yle Tuoreimmat", "<p>Body</p>")])]
+    out = tmp_path / "news.epub"
+
+    build_edition(groups, out, built_at=BUILT_AT)
+
+    book = ebooklib_epub.read_epub(str(out))
+    assert book.get_metadata("DC", "title")[0][0] == "News - Latest"
+
+
+def test_every_article_becomes_a_document(tmp_path: Path):
+    groups = [
+        ("Kotimaa", [written_article(tmp_path, "a", "Yle Tuoreimmat", "<p>A</p>")]),
+        ("Maailma", [written_article(tmp_path, "b", "HS Maailma", "<p>B</p>", hours_ago=2)]),
+    ]
+    out = tmp_path / "news.epub"
+
+    build_edition(groups, out, built_at=BUILT_AT)
+
+    book = ebooklib_epub.read_epub(str(out))
+    names = [i.get_name() for i in book.get_items_of_type(ebooklib.ITEM_DOCUMENT)]
+    assert "article_a.xhtml" in names
+    assert "article_b.xhtml" in names
+
+
+def test_toc_nests_articles_under_section_names(tmp_path: Path):
+    groups = [
+        ("Kotimaa", [written_article(tmp_path, "a", "Yle Tuoreimmat", "<p>A</p>")]),
+        ("Maailma", [written_article(tmp_path, "b", "HS Maailma", "<p>B</p>", hours_ago=2)]),
+    ]
+    out = tmp_path / "news.epub"
+
+    build_edition(groups, out, built_at=BUILT_AT)
+
+    book = ebooklib_epub.read_epub(str(out))
+    section_names = [entry[0].title for entry in book.toc if isinstance(entry, tuple)]
+    assert section_names == ["Kotimaa", "Maailma"]
+
+
+def test_article_body_appears_in_its_document(tmp_path: Path):
+    groups = [("Kotimaa", [written_article(tmp_path, "a", "Yle Tuoreimmat", "<p>Distinctive body</p>")])]
+    out = tmp_path / "news.epub"
+
+    build_edition(groups, out, built_at=BUILT_AT)
+
+    book = ebooklib_epub.read_epub(str(out))
+    item = book.get_item_with_href("article_a.xhtml")
+    assert b"Distinctive body" in item.get_content()
+
+
+def test_masthead_carries_the_build_time(tmp_path: Path):
+    groups = [("Kotimaa", [written_article(tmp_path, "a", "Yle Tuoreimmat", "<p>A</p>")])]
+    out = tmp_path / "news.epub"
+
+    build_edition(groups, out, built_at=BUILT_AT)
+
+    book = ebooklib_epub.read_epub(str(out))
+    masthead = book.get_item_with_href("masthead.xhtml").get_content().decode("utf-8")
+    # 08:17 UTC is 11:17 in Helsinki in August
+    assert "11:17" in masthead
+
+
+def test_source_and_date_are_shown_for_each_article(tmp_path: Path):
+    groups = [("Kotimaa", [written_article(tmp_path, "a", "Yle Tuoreimmat", "<p>A</p>")])]
+    out = tmp_path / "news.epub"
+
+    build_edition(groups, out, built_at=BUILT_AT)
+
+    book = ebooklib_epub.read_epub(str(out))
+    content = book.get_item_with_href("article_a.xhtml").get_content().decode("utf-8")
+    assert "Yle Tuoreimmat" in content
+
+
+def test_images_are_embedded_when_a_cache_is_given(tmp_path: Path):
+    import io as _io
+
+    from PIL import Image as _Image
+
+    def fetcher(url: str) -> bytes:
+        buf = _io.BytesIO()
+        _Image.new("RGB", (100, 50), "blue").save(buf, format="PNG")
+        return buf.getvalue()
+
+    cache = ImageCache(tmp_path / "cache", max_width=480, fetcher=fetcher)
+    body = '<p>A</p><img src="https://example.com/photo.png">'
+    groups = [("Kotimaa", [written_article(tmp_path, "a", "Yle Tuoreimmat", body)])]
+    out = tmp_path / "news.epub"
+
+    build_edition(groups, out, built_at=BUILT_AT, image_cache=cache)
+
+    book = ebooklib_epub.read_epub(str(out))
+    images = list(book.get_items_of_type(ebooklib.ITEM_IMAGE))
+    assert len(images) == 1
+
+
+def test_existing_file_is_replaced_atomically(tmp_path: Path):
+    out = tmp_path / "news.epub"
+    out.write_bytes(b"stale")
+    groups = [("Kotimaa", [written_article(tmp_path, "a", "Yle Tuoreimmat", "<p>A</p>")])]
+
+    build_edition(groups, out, built_at=BUILT_AT)
+
+    assert out.read_bytes() != b"stale"
+    assert [p.name for p in tmp_path.iterdir() if p.suffix == ".tmp"] == []

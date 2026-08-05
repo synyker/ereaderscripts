@@ -1,10 +1,21 @@
 """Builds the news edition EPUB."""
 
+import html as html_lib
 import logging
+import tempfile
+from datetime import datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+from ebooklib import epub as ebooklib_epub
 
 from articles import Article
+from fsutil import atomic_write_bytes
+from images import ImageCache, rewrite_images
 
 log = logging.getLogger(__name__)
+
+HELSINKI = ZoneInfo("Europe/Helsinki")
 
 
 def group_into_sections(
@@ -43,3 +54,126 @@ def group_into_sections(
         (name, sorted(buckets[name], key=lambda a: a.published, reverse=True))
         for name in ordered
     ]
+
+
+STYLESHEET = """\
+body { font-family: Georgia, 'Times New Roman', serif; line-height: 1.6;
+       margin: 0; padding: 0.5em; color: #000; background: #fff; }
+h1 { font-size: 1.3em; margin-bottom: 0.2em; }
+h2 { font-size: 1.1em; margin: 0.5em 0; font-weight: bold; }
+h3 { font-size: 1em; margin: 0.4em 0; font-weight: bold; }
+.meta { font-size: 0.85em; color: #555; margin-bottom: 1em;
+        border-bottom: 1px solid #ccc; padding-bottom: 0.5em; }
+img { max-width: 100%; height: auto; }
+p { margin: 0.8em 0; }
+a { color: #000; text-decoration: underline; }
+"""
+
+ARTICLE_TEMPLATE = """\
+<h1>{title}</h1>
+<div class="meta"><span>{feed}</span> &#183; <span>{published}</span></div>
+{body}
+"""
+
+MASTHEAD_TEMPLATE = """\
+<h1>News</h1>
+<div class="meta">Rakennettu {built_at}</div>
+<p>{summary}</p>
+"""
+
+
+def build_edition(
+    groups: list[tuple[str, list[Article]]],
+    out_path: Path,
+    *,
+    built_at: datetime,
+    image_cache: ImageCache | None = None,
+    title: str = "News - Latest",
+) -> Path:
+    """Render one EPUB containing every article, grouped into sections.
+
+    The title is deliberately plain ASCII: CrossPoint derives the SD-card
+    filename from it, and sanitizes anything else away.
+    """
+    out_path = Path(out_path)
+    local_built = built_at.astimezone(HELSINKI)
+
+    book = ebooklib_epub.EpubBook()
+    book.set_identifier(f"ereaderscripts-news-{local_built.strftime('%Y%m%d%H%M')}")
+    book.set_title(title)
+    book.set_language("fi")
+
+    style = ebooklib_epub.EpubItem(
+        uid="style", file_name="style.css", media_type="text/css", content=STYLESHEET
+    )
+    book.add_item(style)
+
+    total = sum(len(items) for _, items in groups)
+    masthead = _make_document(
+        book,
+        style,
+        uid="masthead",
+        file_name="masthead.xhtml",
+        title="News",
+        content=MASTHEAD_TEMPLATE.format(
+            built_at=local_built.strftime("%-d.%-m.%Y %H:%M"),
+            summary=f"{total} artikkelia, {len(groups)} osastoa.",
+        ),
+    )
+
+    spine = [masthead]
+    toc = []
+
+    for section_name, articles in groups:
+        chapters = []
+        for article in articles:
+            body = article.body
+            if image_cache is not None:
+                body, embedded = rewrite_images(body, image_cache)
+                for name, data in embedded:
+                    book.add_item(
+                        ebooklib_epub.EpubImage(
+                            uid=f"img_{name.rsplit('.', 1)[0]}",
+                            file_name=f"images/{name}",
+                            media_type="image/jpeg",
+                            content=data,
+                        )
+                    )
+
+            chapter = _make_document(
+                book,
+                style,
+                uid=f"article_{article.id}",
+                file_name=f"article_{article.id}.xhtml",
+                title=article.title,
+                content=ARTICLE_TEMPLATE.format(
+                    title=html_lib.escape(article.title),
+                    feed=html_lib.escape(article.feed),
+                    published=article.published.astimezone(HELSINKI).strftime("%-d.%-m. %H:%M"),
+                    body=body,
+                ),
+            )
+            chapters.append(chapter)
+
+        spine.extend(chapters)
+        toc.append((ebooklib_epub.Section(section_name), tuple(chapters)))
+
+    book.toc = tuple(toc)
+    book.spine = ["nav"] + spine
+    book.add_item(ebooklib_epub.EpubNcx())
+    book.add_item(ebooklib_epub.EpubNav())
+
+    with tempfile.TemporaryDirectory() as workdir:
+        staged = Path(workdir) / "edition.epub"
+        ebooklib_epub.write_epub(str(staged), book)
+        atomic_write_bytes(out_path, staged.read_bytes())
+
+    return out_path
+
+
+def _make_document(book, style, *, uid: str, file_name: str, title: str, content: str):
+    document = ebooklib_epub.EpubHtml(uid=uid, title=title, file_name=file_name, lang="fi")
+    document.content = f"<html><head><title>{html_lib.escape(title)}</title></head><body>{content}</body></html>"
+    document.add_item(style)
+    book.add_item(document)
+    return document
