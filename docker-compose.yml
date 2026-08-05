@@ -1,0 +1,12 @@
+services:
+  ereader-news:
+    build: .
+    image: ereader-news
+    entrypoint: ["/usr/local/bin/supercronic", "/app/crontab"]
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ${EREADER_DATA_DIR:?set EREADER_DATA_DIR in .env}:/data
+    environment:
+      TZ: ${TZ:-Europe/Helsinki}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?set PUBLIC_BASE_URL in .env}
+    restart: unless-stopped

@@ -1,0 +1,2 @@
+# Fetch feeds and rebuild the edition hourly, off the top of the hour.
+17 * * * * python /app/fetch_news.py --build-edition
