@@ -1,0 +1,24 @@
+# Fetched news content — never commit. These are verbatim copies of
+# copyrighted articles from third-party news sites.
+ereader-news/
+
+# Deployment configuration (host paths, device addresses, base URLs).
+# Commit config.example.yaml and .env.example instead.
+config.yaml
+.env
+
+# Downloaded/processed article images
+.image-cache/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/

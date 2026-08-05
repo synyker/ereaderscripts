@@ -1,0 +1,5 @@
+feedparser>=6.0
+trafilatura>=1.6
+readability-lxml>=0.8
+requests>=2.31
+lxml>=4.9
