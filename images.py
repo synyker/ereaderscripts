@@ -10,6 +10,8 @@ import requests
 from lxml import etree
 from PIL import Image, ImageOps
 
+from fsutil import atomic_write_bytes
+
 log = logging.getLogger(__name__)
 
 TIMEOUT = 15
@@ -57,8 +59,7 @@ class ImageCache:
         if not converted:
             return None
 
-        self.root.mkdir(parents=True, exist_ok=True)
-        cached.write_bytes(converted)
+        atomic_write_bytes(cached, converted)
         return name, converted
 
     def _convert(self, raw: bytes) -> bytes | None:
@@ -96,7 +97,15 @@ def rewrite_images(html: str, cache: ImageCache) -> tuple[str, list[tuple[str, b
         src = (img.get("src") or "").strip()
         result = cache.get(src) if src.startswith("http") else None
         if not result:
-            img.getparent().remove(img)
+            # Preserve the text that follows the <img> (its tail) when removing it
+            parent = img.getparent()
+            if img.tail:
+                prev = img.getprevious()
+                if prev is not None:
+                    prev.tail = (prev.tail or "") + img.tail
+                else:
+                    parent.text = (parent.text or "") + img.tail
+            parent.remove(img)
             continue
         name, data = result
         embedded[name] = data

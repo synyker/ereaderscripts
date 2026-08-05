@@ -121,3 +121,25 @@ def test_rewrite_leaves_html_without_images_alone(cache: ImageCache):
 
     assert "Just text" in rewritten
     assert embedded == []
+
+
+def test_rewrite_preserves_text_after_a_dropped_image(tmp_path: Path):
+    cache = ImageCache(tmp_path, max_width=480, fetcher=lambda url: None)
+    html = '<p>Keep</p><img src="https://example.com/gone.png">And this trailing text survives'
+
+    rewritten, embedded = rewrite_images(html, cache)
+
+    assert "And this trailing text survives" in rewritten
+    assert "<img" not in rewritten
+    assert embedded == []
+
+
+def test_rewrite_preserves_text_after_first_dropped_image(tmp_path: Path):
+    cache = ImageCache(tmp_path, max_width=480, fetcher=lambda url: None)
+    html = '<img src="https://example.com/gone.png">Leading tail text<p>Rest</p>'
+
+    rewritten, embedded = rewrite_images(html, cache)
+
+    assert "Leading tail text" in rewritten
+    assert "<img" not in rewritten
+    assert embedded == []
