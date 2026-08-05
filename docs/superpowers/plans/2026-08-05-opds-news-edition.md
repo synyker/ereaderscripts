@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- **Do not run any git command.** The user performs all git actions themselves. Every task ends with a checkpoint listing the exact files to stage and a suggested commit message — stop there and let the user commit.
+- **Commit on the feature branch only.** Work happens on `feature/opds-news-edition`. Each task ends by staging its listed files and committing with the suggested message. **Never** `git push`, `git merge`, switch branches, rebase, amend an existing commit, or touch `main` — the user owns everything beyond this branch.
 - **Never commit `ereader-news/`, `config.yaml`, `.env`, `.venv/`, or `.image-cache/`.** `.gitignore` already covers these.
 - No host-specific paths, IP addresses, usernames or base URLs in any tracked file. Deployment values come from `.env` (gitignored) and `config.yaml` (gitignored).
 - Python 3.11+ syntax is fine (`str | None`, `zoneinfo`); the venv runs 3.14.2.
@@ -163,12 +163,12 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
 Run: `.venv/bin/pytest tests/test_fsutil.py -v`
 Expected: 4 passed
 
-- [ ] **Step 7: Checkpoint — hand off to the user for commit**
+- [ ] **Step 7: Commit**
 
 Files to stage: `requirements.txt`, `fsutil.py`, `tests/__init__.py`, `tests/test_fsutil.py`
 Suggested message: `feat: add atomic write helper and test infrastructure`
 
-Do not run git. Report the file list and stop.
+Stage exactly the files listed above and commit with the suggested message. Nothing else.
 
 ---
 
@@ -501,7 +501,7 @@ class ArticleStore:
 Run: `.venv/bin/pytest tests/test_articles.py -v`
 Expected: 15 passed
 
-- [ ] **Step 5: Checkpoint — hand off to the user for commit**
+- [ ] **Step 5: Commit**
 
 Files to stage: `articles.py`, `tests/test_articles.py`
 Suggested message: `feat: extract article store from fetch_news`
@@ -655,7 +655,7 @@ def group_into_sections(
 Run: `.venv/bin/pytest tests/test_epub.py -v`
 Expected: 8 passed
 
-- [ ] **Step 5: Checkpoint — hand off to the user for commit**
+- [ ] **Step 5: Commit**
 
 Files to stage: `epub.py`, `tests/test_epub.py`
 Suggested message: `feat: group articles into topic sections`
@@ -933,7 +933,7 @@ def rewrite_images(html: str, cache: ImageCache) -> tuple[str, list[tuple[str, b
 Run: `.venv/bin/pytest tests/test_images.py -v`
 Expected: 12 passed
 
-- [ ] **Step 5: Checkpoint — hand off to the user for commit**
+- [ ] **Step 5: Commit**
 
 Files to stage: `images.py`, `tests/test_images.py`
 Suggested message: `feat: add greyscale image conversion and cache`
@@ -1245,7 +1245,7 @@ def _make_document(book, style, *, uid: str, file_name: str, title: str, content
 Run: `.venv/bin/pytest tests/test_epub.py -v`
 Expected: 17 passed
 
-- [ ] **Step 5: Checkpoint — hand off to the user for commit**
+- [ ] **Step 5: Commit**
 
 Files to stage: `epub.py`, `tests/test_epub.py`
 Suggested message: `feat: render the news edition as an EPUB`
@@ -1487,7 +1487,7 @@ def write_catalog(
 Run: `.venv/bin/pytest tests/test_opds.py -v`
 Expected: 12 passed
 
-- [ ] **Step 5: Checkpoint — hand off to the user for commit**
+- [ ] **Step 5: Commit**
 
 Files to stage: `opds.py`, `tests/test_opds.py`
 Suggested message: `feat: generate the OPDS catalog`
@@ -1865,7 +1865,7 @@ Expected: all tests pass (5 new in `test_edition_config.py`)
 Run: `.venv/bin/python fetch_news.py --clean-only`
 Expected: exits 0, logs a prune count, does not crash on the existing `ereader-news/` content.
 
-- [ ] **Step 9: Checkpoint — hand off to the user for commit**
+- [ ] **Step 9: Commit**
 
 Files to stage: `fetch_news.py`, `tests/test_edition_config.py`
 Suggested message: `feat: add --build-edition and delegate storage to ArticleStore`
@@ -2223,7 +2223,7 @@ Expected: prints the directories it ensured, exits 0.
 Run: `.venv/bin/python fetch_news.py --build-edition`
 Expected: builds `public/news-latest.epub` and `public/opds.xml` from the ~95 articles already on disk. Open the EPUB in any reader and confirm the sections and TOC look right.
 
-- [ ] **Step 9: Checkpoint — hand off to the user for commit**
+- [ ] **Step 9: Commit**
 
 Files to stage: `init.py`, `config.example.yaml`, `.env.example`, `tests/test_init.py`
 (`config.yaml` is gitignored and must not be staged.)
@@ -2352,7 +2352,7 @@ Expected: prints the argparse help including `--build-edition`.
 
 If Docker is not available on this machine, note that these two checks are deferred to the server and say so explicitly rather than marking the step done.
 
-- [ ] **Step 6: Checkpoint — hand off to the user for commit**
+- [ ] **Step 6: Commit**
 
 Files to stage: `Dockerfile`, `docker-compose.yml`, `crontab`, `docs/nginx.example.conf`
 Suggested message: `feat: add Docker Compose deployment`
@@ -2528,7 +2528,7 @@ card instead of accumulating copies.
 Run: `.venv/bin/pytest tests/ -v`
 Expected: all tests pass.
 
-- [ ] **Step 8: Checkpoint — hand off to the user for commit**
+- [ ] **Step 8: Commit**
 
 Files to stage: `LICENSE`, `README.md`
 Suggested message: `docs: cover the OPDS path and add the MIT license`
