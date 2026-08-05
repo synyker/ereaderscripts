@@ -82,3 +82,33 @@ def test_articles_within_a_section_are_newest_first():
 
 def test_no_articles_produces_no_groups():
     assert group_into_sections([], SECTION_ORDER, FEED_SECTIONS) == []
+
+
+def test_feed_mapped_to_invalid_section_lands_in_fallback():
+    """If a feed is mapped to a section name not in section_order, route to fallback instead."""
+    invalid_feed_sections = {
+        "HS Maailma": "Maailma",
+        "Unknown Feed": "Talous",  # "Talous" is not in SECTION_ORDER
+    }
+    groups = group_into_sections([article("a", "Unknown Feed")], SECTION_ORDER, invalid_feed_sections)
+
+    assert groups[0][0] == "Muut"
+    assert [a.id for a in groups[0][1]] == ["a"]
+
+
+def test_invalid_section_articles_sort_with_other_fallback_articles():
+    """Articles from invalid sections sort newest-first alongside unmapped feeds in fallback."""
+    invalid_feed_sections = {
+        "HS Maailma": "Maailma",
+        "Unknown Feed": "Talous",  # "Talous" is not in SECTION_ORDER
+    }
+    articles = [
+        article("from_invalid_section", "Unknown Feed", hours_ago=3),  # invalid section "Talous"
+        article("from_true_unmapped", "Never Mapped", hours_ago=1),  # no mapping, uses fallback
+    ]
+
+    groups = group_into_sections(articles, SECTION_ORDER, invalid_feed_sections)
+
+    assert groups[0][0] == "Muut"
+    # Sorted newest-first: hours_ago=1 before hours_ago=3
+    assert [a.id for a in groups[0][1]] == ["from_true_unmapped", "from_invalid_section"]
