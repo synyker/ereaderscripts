@@ -85,3 +85,15 @@ def test_unparseable_config_is_an_error(tmp_path: Path):
 
     with pytest.raises(SystemExit):
         bootstrap(config_path, tmp_path)
+
+
+def test_uncreatable_output_dir_exits_cleanly(tmp_path: Path):
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory", encoding="utf-8")
+
+    config = {**CONFIG, "output_dir": str(blocker / "sub")}
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        bootstrap(config_path, tmp_path)

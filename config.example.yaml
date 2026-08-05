@@ -1,22 +1,26 @@
 # RSS News Fetcher — copy to config.yaml and edit.
 # config.yaml is gitignored; this file is the committed template.
 
-# Where articles are stored. In Docker this is inside the bind mount.
-output_dir: /data/articles
+# Where articles are stored. Relative paths resolve against the project root.
+# The Docker deployment overrides these to paths inside the bind mount.
+output_dir: ./ereader-news
+# output_dir: /data/articles   # uncomment for the Docker deployment (paths inside the bind mount)
 
 # Where the EPUB and OPDS catalog are published for nginx to serve.
-public_dir: /data/public
+public_dir: ./public
+# public_dir: /data/public   # uncomment for the Docker deployment (paths inside the bind mount)
 
 # Public URL that maps to public_dir. Overridable with $PUBLIC_BASE_URL.
 public_base_url: https://news.example.com/news
 
 # Cache of downloaded, greyscale-converted article images.
-image_cache_dir: /data/.image-cache
+image_cache_dir: ./.image-cache
+# image_cache_dir: /data/.image-cache   # uncomment for the Docker deployment (paths inside the bind mount)
 
 max_age_days: 3
 max_articles_per_feed: 15
 
-# --- Kindle sync (manual: docker compose run --rm ereader-news --sync) -------
+# --- Kindle sync (manual sync: docker compose run --rm -v "$EREADER_SSH_DIR:/root/.ssh:ro" --entrypoint python ereader-news /app/fetch_news.py --sync) -------
 kindle_host: root@KINDLE_IP          # e.g. root@192.168.1.42
 kindle_news_dir: /mnt/us/koreader/news
 kindle_ssh_key: /root/.ssh/id_ed25519

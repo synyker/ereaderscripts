@@ -48,7 +48,10 @@ def bootstrap(config_path: Path, project_root: Path) -> list[str]:
 
     output_dir = resolve("output_dir", "ereader-news")
     for path in (output_dir, resolve("public_dir", "public"), resolve("image_cache_dir", ".image-cache")):
-        path.mkdir(parents=True, exist_ok=True)
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            sys.exit(f"Cannot create {path}: {e}")
         messages.append(f"Ensured {path}")
 
     for feed in cfg.get("feeds", []):

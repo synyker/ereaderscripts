@@ -16,7 +16,7 @@ from fsutil import atomic_write_bytes
 
 HELSINKI = ZoneInfo("Europe/Helsinki")
 ID_PATTERN = re.compile(r"_([a-z0-9]{12})\.html$")
-ARTICLE_PATTERN = re.compile(r"<article>(.*?)</article>", re.DOTALL)
+ARTICLE_PATTERN = re.compile(r"<article>(.*)</article>", re.DOTALL)
 
 
 def feed_dir_name(feed: str) -> str:

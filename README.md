@@ -28,6 +28,10 @@ The EPUB and catalog land in `public_dir`. Point the X4 at
 - **E-ink optimized HTML**: Generates clean, readable HTML files designed for e-ink displays
 - **Per-feed age limits**: Customize how old articles can be for each feed (e.g., 3 days for news, 1 week for local news)
 - **Automatic cleanup**: Remove old articles based on age
+- **EPUB edition**: Bundles recent articles into a single EPUB with topic sections and a nested table of contents
+- **OPDS catalog**: Publishes the edition for wireless download on the Xteink X4 (CrossPoint) and other OPDS clients
+- **Greyscale image processing**: Downscales and converts embedded images for e-ink panels
+- **Docker deployment**: Runs unattended with hourly edition rebuilds
 - **Kindle sync**: Push articles to your Kindle via SSH/SCP (no rsync required)
 - **Article index**: Auto-generates an index.html listing all downloaded articles
 - **Web scraping**: Fetch news from websites without RSS feeds
@@ -165,6 +169,9 @@ docker compose run --rm \
 4. **Sync** (optional): Push articles to Kindle using SCP over SSH (no rsync required on Kindle)
 5. **Cleanup**: Automatically remove articles older than the configured age limit
 6. **Index**: Generate an index.html with links to all articles
+7. **Edition** (optional): Build an EPUB from the last 24h of articles, grouped into topic sections with a nested TOC
+8. **Catalog**: Write an OPDS catalog pointing at the EPUB
+9. **Device pull**: The X4 (or another OPDS client) downloads the edition on demand when you open the catalog
 
 ## Output Structure
 

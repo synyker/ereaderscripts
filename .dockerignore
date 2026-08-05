@@ -1,0 +1,13 @@
+.git
+.venv
+ereader-news
+public
+.image-cache
+.superpowers
+__pycache__
+*.pyc
+.pytest_cache
+tests
+docs
+.env
+config.yaml

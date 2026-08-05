@@ -115,6 +115,26 @@ def test_body_returns_article_element_contents(store: ArticleStore):
     assert store.since(24, now=NOW)[0].body.strip() == "<p>Body text</p>"
 
 
+def test_body_keeps_content_after_a_nested_article_element(store: ArticleStore):
+    store.save(
+        article_id="aaaaaaaaaaaa",
+        url="https://example.com/aaaaaaaaaaaa",
+        title="Title aaaaaaaaaaaa",
+        feed="Yle Tuoreimmat",
+        published=NOW - timedelta(hours=1),
+        html=(
+            "<html><body><article><p>Start</p>"
+            "<article><p>Inner</p></article>"
+            "<p>After inner</p></article></body></html>"
+        ),
+    )
+
+    body = store.since(24, now=NOW)[0].body
+
+    assert "Inner" in body
+    assert "After inner" in body
+
+
 def test_prune_deletes_old_pairs_and_reports_the_count(store: ArticleStore):
     save(store, "old000000000", hours_ago=24 * 5)
     save(store, "new000000000", hours_ago=2)

@@ -1,8 +1,10 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import yaml
+
 from articles import ArticleStore
-from fetch_news import build_edition_from_store, feed_section_map
+from fetch_news import build_edition_from_store, feed_section_map, load_config
 
 NOW = datetime(2026, 8, 5, 12, 0, tzinfo=timezone.utc)
 
@@ -78,3 +80,44 @@ def test_empty_window_keeps_the_previous_edition(tmp_path: Path):
 
     assert build_edition_from_store(cfg, store, now=NOW) is False
     assert (public / "news-latest.epub").read_bytes() == b"previous edition"
+
+
+def write_minimal_config(tmp_path: Path) -> Path:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "public_base_url": "https://file.example.com/news",
+                "kindle_host": "root@file-host",
+                "kindle_ssh_key": "/file/ssh/key",
+            }
+        ),
+        encoding="utf-8",
+    )
+    return config_path
+
+
+def test_env_overrides_win_over_file_values(tmp_path: Path, monkeypatch):
+    config_path = write_minimal_config(tmp_path)
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://env.example.com/news")
+    monkeypatch.setenv("KINDLE_HOST", "root@env-host")
+    monkeypatch.setenv("KINDLE_SSH_KEY", "/env/ssh/key")
+
+    cfg = load_config(str(config_path))
+
+    assert cfg["public_base_url"] == "https://env.example.com/news"
+    assert cfg["kindle_host"] == "root@env-host"
+    assert cfg["kindle_ssh_key"] == "/env/ssh/key"
+
+
+def test_file_values_used_when_env_unset(tmp_path: Path, monkeypatch):
+    config_path = write_minimal_config(tmp_path)
+    monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+    monkeypatch.delenv("KINDLE_HOST", raising=False)
+    monkeypatch.delenv("KINDLE_SSH_KEY", raising=False)
+
+    cfg = load_config(str(config_path))
+
+    assert cfg["public_base_url"] == "https://file.example.com/news"
+    assert cfg["kindle_host"] == "root@file-host"
+    assert cfg["kindle_ssh_key"] == "/file/ssh/key"
