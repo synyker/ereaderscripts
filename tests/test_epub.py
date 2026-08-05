@@ -238,6 +238,51 @@ def test_images_are_embedded_when_a_cache_is_given(tmp_path: Path):
     assert len(images) == 1
 
 
+def test_shared_image_is_embedded_once_and_referenced_by_both_articles(tmp_path: Path):
+    import io as _io
+
+    from PIL import Image as _Image
+
+    def fetcher(url: str) -> bytes:
+        buf = _io.BytesIO()
+        _Image.new("RGB", (100, 50), "blue").save(buf, format="PNG")
+        return buf.getvalue()
+
+    cache = ImageCache(tmp_path / "cache", max_width=480, fetcher=fetcher)
+    body = '<p>A</p><img src="https://example.com/wire-photo.png">'
+    groups = [
+        ("Kotimaa", [written_article(tmp_path, "a", "Yle Tuoreimmat", body)]),
+        ("Maailma", [written_article(tmp_path, "b", "HS Maailma", body, hours_ago=2)]),
+    ]
+    out = tmp_path / "news.epub"
+
+    build_edition(groups, out, built_at=BUILT_AT, image_cache=cache)
+
+    book = ebooklib_epub.read_epub(str(out))
+    images = list(book.get_items_of_type(ebooklib.ITEM_IMAGE))
+    assert len(images) == 1
+
+    image_name = images[0].get_name().rsplit("/", 1)[-1]
+    content_a = book.get_item_with_href("article_a.xhtml").get_content().decode("utf-8")
+    content_b = book.get_item_with_href("article_b.xhtml").get_content().decode("utf-8")
+    assert f"images/{image_name}" in content_a
+    assert f"images/{image_name}" in content_b
+
+
+def test_spine_order_is_nav_masthead_then_articles_in_section_order(tmp_path: Path):
+    groups = [
+        ("Kotimaa", [written_article(tmp_path, "a", "Yle Tuoreimmat", "<p>A</p>")]),
+        ("Maailma", [written_article(tmp_path, "b", "HS Maailma", "<p>B</p>", hours_ago=2)]),
+    ]
+    out = tmp_path / "news.epub"
+
+    build_edition(groups, out, built_at=BUILT_AT)
+
+    book = ebooklib_epub.read_epub(str(out))
+    idrefs = [idref for idref, _linear in book.spine]
+    assert idrefs == ["nav", "masthead", "article_a", "article_b"]
+
+
 def test_existing_file_is_replaced_atomically(tmp_path: Path):
     out = tmp_path / "news.epub"
     out.write_bytes(b"stale")

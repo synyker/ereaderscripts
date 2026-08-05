@@ -123,6 +123,7 @@ def build_edition(
 
     spine = [masthead]
     toc = []
+    embedded_image_names: set[str] = set()
 
     for section_name, articles in groups:
         chapters = []
@@ -131,6 +132,14 @@ def build_edition(
             if image_cache is not None:
                 body, embedded = rewrite_images(body, image_cache)
                 for name, data in embedded:
+                    # Two articles can share the same wire photo; rewrite_images
+                    # only dedupes within a single article, so dedup across the
+                    # whole build here. Every article's <img src> is still
+                    # rewritten to images/<name>, they just share one manifest
+                    # item instead of colliding on it.
+                    if name in embedded_image_names:
+                        continue
+                    embedded_image_names.add(name)
                     book.add_item(
                         ebooklib_epub.EpubImage(
                             uid=f"img_{name.rsplit('.', 1)[0]}",
