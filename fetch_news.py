@@ -33,6 +33,11 @@ import trafilatura
 from lxml import etree
 from readability import Document
 
+from articles import ArticleStore
+from epub import build_edition, group_into_sections
+from images import ImageCache
+from opds import CatalogEntry, write_catalog
+
 log_level = logging.DEBUG if os.environ.get("DEBUG") else logging.INFO
 logging.basicConfig(
     level=log_level,
@@ -45,10 +50,19 @@ log = logging.getLogger(__name__)
 
 DEFAULT_CONFIG = {
     "output_dir": "ereader-news",
+    "public_dir": "public",
+    "public_base_url": "http://localhost:8000",
+    "image_cache_dir": ".image-cache",
     "max_age_days": 3,
     "max_articles_per_feed": 15,
     "kindle_host": "root@192.168.1.x",
     "kindle_news_dir": "/mnt/us/koreader/news",
+    "sections": [],
+    "edition": {
+        "window_hours": 24,
+        "image_max_width": 480,
+        "embed_images": True,
+    },
     "feeds": [],
 }
 
@@ -66,7 +80,22 @@ def load_config(config_path: str) -> dict:
         user_cfg = yaml.safe_load(f) or {}
 
     cfg = {**DEFAULT_CONFIG, **user_cfg}
-    cfg["output_dir"] = os.path.expanduser(cfg["output_dir"])
+
+    for key, env_var in (
+        ("public_base_url", "PUBLIC_BASE_URL"),
+        ("kindle_host", "KINDLE_HOST"),
+        ("kindle_ssh_key", "KINDLE_SSH_KEY"),
+    ):
+        if os.environ.get(env_var):
+            cfg[key] = os.environ[env_var]
+
+    # Resolve relative paths against the project root, not the working
+    # directory, so cron and `docker compose run` agree with init.py.
+    project_root = Path(__file__).parent
+    for key in ("output_dir", "public_dir", "image_cache_dir"):
+        path = Path(os.path.expanduser(cfg[key]))
+        cfg[key] = str(path if path.is_absolute() else project_root / path)
+
     return cfg
 
 
@@ -356,6 +385,7 @@ def parse_feed(feed_url: str, max_age_hours: int = 24) -> list[dict]:
             "link": link,
             "date": pub_date,
             "summary": entry.get("summary", ""),
+            "published_at": pub_datetime,
         })
     return entries
 
@@ -515,6 +545,7 @@ def scrape_articles(page_url: str, max_age_hours: int = 24, selector: str = '//*
                 "link": href,
                 "date": pub_date,
                 "summary": "",
+                "published_at": pub_datetime,
             })
 
     except Exception as e:
@@ -523,7 +554,7 @@ def scrape_articles(page_url: str, max_age_hours: int = 24, selector: str = '//*
     return entries
 
 
-def process_feed(feed_cfg: dict, output_dir: Path, existing_ids: set) -> list[Path]:
+def process_feed(feed_cfg: dict, store: ArticleStore) -> int:
     """Process a single feed: fetch articles, extract content, write HTML files."""
     feed_name = feed_cfg["name"]
     feed_url = feed_cfg["url"]
@@ -546,17 +577,12 @@ def process_feed(feed_cfg: dict, output_dir: Path, existing_ids: set) -> list[Pa
 
     log.info("  Found %d entries", len(entries))
 
-    # Create feed subdirectory
-    safe_name = re.sub(r'[^\w\s-]', '', feed_name).strip().replace(' ', '_')
-    feed_dir = output_dir / safe_name
-    feed_dir.mkdir(parents=True, exist_ok=True)
-
-    created_files = []
+    created = 0
 
     for entry in entries:
         aid = article_id(entry["link"])
 
-        if aid in existing_ids:
+        if store.has(aid):
             log.info("  Skipping (already exists): %s", entry["title"][:60])
             continue
 
@@ -568,19 +594,10 @@ def process_feed(feed_cfg: dict, output_dir: Path, existing_ids: set) -> list[Pa
 
         extracted = extract_article(raw_html, entry["link"])
         if not extracted:
-            log.warning("  Could not extract article content: %s",
-                        entry["link"])
+            log.warning("  Could not extract article content: %s", entry["link"])
             continue
 
-        title = extracted["title"] or entry["title"]
-        # Clean up extracted HTML in title, then sanitize Unicode
-        title = sanitize_content(clean_extracted_html(title))
-
-        date_prefix = entry["date"][:10].replace(
-            "-", "") if entry["date"] else "nodate"
-        filename = f"{date_prefix}_{aid}.html"
-
-        # Clean up extracted HTML first, then sanitize Unicode
+        title = sanitize_content(clean_extracted_html(extracted["title"] or entry["title"]))
         cleaned_content = clean_extracted_html(extracted["content"])
         article_html = HTML_TEMPLATE.format(
             lang="fi",
@@ -590,78 +607,22 @@ def process_feed(feed_cfg: dict, output_dir: Path, existing_ids: set) -> list[Pa
             content=sanitize_content(cleaned_content),
         )
 
-        filepath = feed_dir / filename
-
-        filepath.write_text(article_html, encoding="utf-8")
-        created_files.append(filepath)
-        log.info("  Saved: %s", filepath.name)
-
-        # Write metadata file to track article info
-        meta_path = filepath.with_suffix(".meta")
-        meta_path.write_text(
-            f"url={entry['link']}\ntitle={title}\ndate={entry['date']}\nfetched={datetime.now(timezone.utc).isoformat()}\n",
-            encoding="utf-8",
+        published = entry.get("published_at") or datetime.now(timezone.utc)
+        path = store.save(
+            article_id=aid,
+            url=entry["link"],
+            title=title,
+            feed=feed_name,
+            published=published,
+            html=article_html,
         )
+        created += 1
+        log.info("  Saved: %s", path.name)
 
         # Be polite to servers
         time.sleep(1)
 
-    return created_files
-
-
-def get_existing_article_ids(output_dir: Path) -> set:
-    """Scan output directory and return set of article IDs already downloaded."""
-    ids = set()
-    for html_file in output_dir.rglob("*.html"):
-        # Extract ID from filename pattern: YYYYMMDD_<id>.html
-        match = re.search(r'_([a-f0-9]{12})\.html$', html_file.name)
-        if match:
-            ids.add(match.group(1))
-    return ids
-
-
-# --- Cleanup -----------------------------------------------------------------
-
-def cleanup_old_articles(output_dir: Path, max_age_days: int) -> int:
-    """Delete articles older than max_age_days based on publish date. Returns count of deleted files."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
-    deleted = 0
-
-    for meta_file in output_dir.rglob("*.meta"):
-        try:
-            meta_content = meta_file.read_text(encoding="utf-8")
-            pub_date_str = ""
-
-            # Extract publication date from metadata
-            for line in meta_content.splitlines():
-                if line.startswith("date="):
-                    pub_date_str = line.split("=", 1)[1]
-                    break
-
-            # Parse the publication date (format: YYYY-MM-DD HH:MM)
-            if pub_date_str:
-                try:
-                    pub_datetime = datetime.strptime(pub_date_str, "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
-                    if pub_datetime < cutoff:
-                        # Delete both .html and .meta
-                        html_file = meta_file.with_suffix(".html")
-                        if html_file.exists():
-                            html_file.unlink()
-                            deleted += 1
-                        meta_file.unlink()
-                        log.info("  Deleted old article: %s", html_file.name)
-                except ValueError:
-                    pass
-        except (ValueError, OSError) as e:
-            log.warning("  Error processing %s: %s", meta_file, e)
-
-    # Remove empty feed directories
-    for subdir in output_dir.iterdir():
-        if subdir.is_dir() and not any(subdir.iterdir()):
-            subdir.rmdir()
-            log.info("  Removed empty directory: %s", subdir.name)
-
-    return deleted
+    return created
 
 
 # --- Kindle Sync (SSH) -------------------------------------------------------
@@ -1000,35 +961,84 @@ def generate_all_links(output_dir: Path) -> None:
     log.info("Generated all_links.html with %d articles", len(articles))
 
 
+# --- Edition (EPUB + OPDS) ---------------------------------------------------
+
+def feed_section_map(cfg: dict) -> dict[str, str]:
+    """Map each feed's display name to its configured topic section."""
+    return {
+        feed["name"]: feed["section"]
+        for feed in cfg.get("feeds", [])
+        if feed.get("section")
+    }
+
+
+def build_edition_from_store(cfg: dict, store: ArticleStore, now: datetime) -> bool:
+    """Build the EPUB edition and OPDS catalog. False if there was nothing to publish."""
+    edition_cfg = cfg.get("edition", {})
+    window_hours = edition_cfg.get("window_hours", 24)
+
+    selected = store.since(window_hours, now=now)
+    if not selected:
+        log.warning(
+            "No articles in the last %dh; keeping the previous edition", window_hours
+        )
+        return False
+
+    groups = group_into_sections(selected, cfg.get("sections", []), feed_section_map(cfg))
+
+    image_cache = None
+    if edition_cfg.get("embed_images", True):
+        image_cache = ImageCache(
+            Path(cfg["image_cache_dir"]), edition_cfg.get("image_max_width", 480)
+        )
+
+    public_dir = Path(cfg["public_dir"])
+    epub_path = public_dir / "news-latest.epub"
+    build_edition(groups, epub_path, built_at=now, image_cache=image_cache)
+    log.info(
+        "Built %s: %d articles in %d sections", epub_path.name, len(selected), len(groups)
+    )
+
+    base_url = cfg["public_base_url"].rstrip("/")
+    write_catalog(
+        public_dir / "opds.xml",
+        [
+            CatalogEntry(
+                id="urn:ereaderscripts:news:latest",
+                title="News - Latest",
+                updated=now,
+                href=f"{base_url}/news-latest.epub",
+            )
+        ],
+        feed_id="urn:ereaderscripts:news",
+        feed_title="News",
+        updated=now,
+        self_href=f"{base_url}/opds.xml",
+    )
+    log.info("Wrote OPDS catalog to %s", public_dir / "opds.xml")
+    return True
+
+
 # --- Main --------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Fetch RSS news as clean HTML for KOReader on Kindle"
+        description="Fetch RSS news as clean HTML and publish it to e-readers"
     )
-    parser.add_argument(
-        "--config", default="config.yaml",
-        help="Path to YAML config file (default: config.yaml)",
-    )
-    parser.add_argument(
-        "--sync", action="store_true",
-        help="Sync downloaded news to Kindle after fetching",
-    )
-    parser.add_argument(
-        "--clean-only", action="store_true",
-        help="Only clean old articles, don't fetch new ones",
-    )
-    parser.add_argument(
-        "--feed-url", type=str,
-        help="Fetch a single feed URL (ignores config feeds)",
-    )
-    parser.add_argument(
-        "--rss-file", type=str,
-        help="Parse a local RSS file instead of fetching from URL",
-    )
+    parser.add_argument("--config", default="config.yaml",
+                        help="Path to YAML config file (default: config.yaml)")
+    parser.add_argument("--sync", action="store_true",
+                        help="Sync downloaded news to Kindle after fetching")
+    parser.add_argument("--build-edition", action="store_true",
+                        help="Build the EPUB edition and OPDS catalog after fetching")
+    parser.add_argument("--clean-only", action="store_true",
+                        help="Only clean old articles, don't fetch new ones")
+    parser.add_argument("--feed-url", type=str,
+                        help="Fetch a single feed URL (ignores config feeds)")
+    parser.add_argument("--rss-file", type=str,
+                        help="Parse a local RSS file instead of fetching from URL")
     args = parser.parse_args()
 
-    # Resolve config path relative to script directory
     script_dir = Path(__file__).parent
     config_path = args.config
     if not os.path.isabs(config_path):
@@ -1037,55 +1047,47 @@ def main():
     cfg = load_config(str(config_path))
     output_dir = Path(cfg["output_dir"])
     output_dir.mkdir(parents=True, exist_ok=True)
+    store = ArticleStore(output_dir)
+    now = datetime.now(timezone.utc)
 
-    # Cleanup old articles
     log.info("Cleaning articles older than %d days...", cfg["max_age_days"])
-    deleted = cleanup_old_articles(output_dir, cfg["max_age_days"])
-    log.info("Deleted %d old articles", deleted)
+    log.info("Deleted %d old articles", store.prune(cfg["max_age_days"], now=now))
 
     if args.clean_only:
         return
 
-    # Determine feeds to process
     feeds = cfg["feeds"]
     if args.feed_url:
-        feeds = [{"name": "CLI Feed", "url": args.feed_url,
-                  "limit": cfg["max_articles_per_feed"]}]
+        feeds = [{"name": "CLI Feed", "url": args.feed_url}]
     elif args.rss_file:
-        # feedparser can handle local files via file:// URI
         rss_path = Path(args.rss_file).resolve()
         if not rss_path.exists():
             log.error("RSS file not found: %s", args.rss_file)
             sys.exit(1)
-        feeds = [{"name": rss_path.stem, "url": str(
-            rss_path), "limit": cfg["max_articles_per_feed"]}]
+        feeds = [{"name": rss_path.stem, "url": str(rss_path)}]
 
     if not feeds:
         log.error("No feeds configured. Edit config.yaml to add RSS feed URLs.")
         sys.exit(1)
 
-    # Get existing article IDs to avoid re-downloading
-    existing_ids = get_existing_article_ids(output_dir)
-    log.info("Found %d existing articles", len(existing_ids))
-
-    # Process each feed
-    total_new = 0
-    for feed_cfg in feeds:
-        created = process_feed(feed_cfg, output_dir, existing_ids)
-        total_new += len(created)
-
+    total_new = sum(process_feed(feed_cfg, store) for feed_cfg in feeds)
     log.info("Fetched %d new articles total", total_new)
 
-    # Generate index and all articles pages
     generate_index(output_dir)
     generate_all_articles(output_dir)
     generate_all_links(output_dir)
 
-    # Sync to Kindle if requested
+    if args.build_edition:
+        build_edition_from_store(cfg, store, now=now)
+
     if args.sync:
-        kindle_ssh_key = cfg.get("kindle_ssh_key")
-        kindle_ssh_port = cfg.get("kindle_ssh_port", 22)
-        sync_to_kindle_scp(output_dir, cfg["kindle_host"], cfg["kindle_news_dir"], kindle_ssh_key, kindle_ssh_port)
+        sync_to_kindle_scp(
+            output_dir,
+            cfg["kindle_host"],
+            cfg["kindle_news_dir"],
+            cfg.get("kindle_ssh_key"),
+            cfg.get("kindle_ssh_port", 22),
+        )
 
 
 if __name__ == "__main__":

@@ -1,6 +1,25 @@
-# RSS News Fetcher for KOReader on Kindle
+# RSS News Fetcher for E-Readers
 
-Automatically fetch articles from RSS feeds, extract clean content, and sync them to your Kindle for reading with KOReader.
+Fetch articles from RSS feeds, extract clean content, and read them on an e-reader.
+
+Two delivery paths:
+
+- **Xteink X4 (CrossPoint firmware)** — articles are bundled into a single EPUB
+  edition with topic sections and a nested table of contents, published through an
+  OPDS catalog the device browses over Wi-Fi.
+- **Kindle (KOReader)** — articles are synced as individual HTML files over SSH.
+
+## Quick start
+
+```bash
+python -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python init.py          # creates config.yaml, .env and the directories
+$EDITOR config.yaml               # add your feeds and section mapping
+.venv/bin/python fetch_news.py --build-edition
+```
+
+The EPUB and catalog land in `public_dir`. Point the X4 at
+`<public_base_url>/opds.xml` under Settings → System → OPDS Servers.
 
 ## Features
 
@@ -107,6 +126,37 @@ This setup:
 - Syncs everything to Kindle once a day at 07:30
 - Keeps articles stored locally based on their age limits
 
+## Deploying with Docker
+
+```bash
+cp .env.example .env
+$EDITOR .env                 # EREADER_DATA_DIR and PUBLIC_BASE_URL are required
+docker compose up -d
+```
+
+The container rebuilds the edition hourly at :17. Publish it with the nginx snippet
+in [docs/nginx.example.conf](docs/nginx.example.conf), which serves
+`$EREADER_DATA_DIR/public/` directly — there is no upstream to proxy to.
+
+Two requirements come from the device's HTTP client:
+
+- **A publicly trusted TLS certificate.** CrossPoint verifies against the ESP32
+  bundled CA roots and cannot be told to skip verification, so self-signed and
+  private-CA certificates fail outright. Let's Encrypt works.
+- **Basic auth, not Digest.** Credentials are sent preemptively on the first
+  request. Create the password file with
+  `htpasswd -c /etc/nginx/htpasswd/news <username>`.
+
+Syncing to a Kindle instead is manual, since KOReader's SSH server is started by
+hand on the device:
+
+```bash
+docker compose run --rm \
+  -v "${EREADER_SSH_DIR}:/root/.ssh:ro" \
+  --entrypoint python \
+  ereader-news /app/fetch_news.py --sync
+```
+
 ## How It Works
 
 1. **Fetch**: Parse RSS feeds and download articles from the last N hours (configurable per feed)
@@ -138,6 +188,13 @@ Each article has:
 - `.html`: The actual article content, formatted for e-ink reading
 - `.meta`: Metadata (original URL, title, publication date, fetch timestamp)
 
+### How updates reach the device
+
+CrossPoint has no background sync. The server rebuilds the edition hourly; the X4
+downloads it when you open the OPDS catalog and select the entry. The title stays
+`News - Latest` on purpose, so each download replaces the previous file on the SD
+card instead of accumulating copies.
+
 ## Configuration Reference
 
 ### Global Settings
@@ -152,16 +209,42 @@ kindle_ssh_key: ~/.ssh/id_rsa          # SSH private key (optional, uses default
 kindle_ssh_port: 2222                  # SSH port (default: 22, Kindle uses 2222)
 ```
 
-### Per-Feed Settings
+### Edition and publishing
+
+```yaml
+public_dir: /data/public                          # Where the EPUB and catalog are written
+public_base_url: https://news.example.com/news    # Public URL mapping to public_dir
+image_cache_dir: /data/.image-cache               # Converted image cache
+
+edition:
+  window_hours: 24        # "Latest" covers articles from this many hours
+  image_max_width: 480    # Downscale target in pixels
+  embed_images: true      # false ships a text-only edition
+
+sections:                 # TOC order; every feed maps into one of these
+  - Kotimaa
+  - Maailma
+  - Helsinki
+  - Kulttuuri
+```
+
+`public_base_url`, `kindle_host` and `kindle_ssh_key` can be overridden by the
+environment variables `PUBLIC_BASE_URL`, `KINDLE_HOST` and `KINDLE_SSH_KEY`, which
+take precedence over the file.
+
+### Per-feed section
 
 ```yaml
 feeds:
-  - name: "Feed Name"                  # Display name (used for output directory)
-    url: "https://..."                 # RSS/Atom feed URL or webpage to scrape
-    max_age_hours: 72                  # Only articles from last N hours (default: 72)
-    type: "rss"                        # Feed type: "rss" (default) or "scrape"
-    selector: '//*[@id="sisalto"]'     # XPath selector for scrape feeds (required for type: "scrape")
+  - name: "HS Maailma"
+    url: "http://www.hs.fi/rss/maailma.xml"
+    section: "Maailma"      # Must match an entry in `sections`
 ```
+
+A feed with no `section` lands in a trailing "Muut" section rather than being
+dropped.
+
+### Scrape feeds
 
 For scrape feeds (no RSS available), you need to specify:
 - `type: "scrape"` - Enables web scraping instead of RSS parsing
@@ -205,4 +288,4 @@ For scrape feeds (no RSS available), you need to specify:
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE)

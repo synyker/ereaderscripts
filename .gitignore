@@ -9,6 +9,10 @@ config.yaml
 
 # Downloaded/processed article images
 .image-cache/
+public/
+
+# Subagent-driven development scratch (ledger, briefs, review packages)
+.superpowers/
 
 # Python
 .venv/

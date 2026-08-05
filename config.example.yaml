@@ -1,0 +1,87 @@
+# RSS News Fetcher — copy to config.yaml and edit.
+# config.yaml is gitignored; this file is the committed template.
+
+# Where articles are stored. In Docker this is inside the bind mount.
+output_dir: /data/articles
+
+# Where the EPUB and OPDS catalog are published for nginx to serve.
+public_dir: /data/public
+
+# Public URL that maps to public_dir. Overridable with $PUBLIC_BASE_URL.
+public_base_url: https://news.example.com/news
+
+# Cache of downloaded, greyscale-converted article images.
+image_cache_dir: /data/.image-cache
+
+max_age_days: 3
+max_articles_per_feed: 15
+
+# --- Kindle sync (manual: docker compose run --rm ereader-news --sync) -------
+kindle_host: root@KINDLE_IP          # e.g. root@192.168.1.42
+kindle_news_dir: /mnt/us/koreader/news
+kindle_ssh_key: /root/.ssh/id_ed25519
+kindle_ssh_port: 2222
+
+# --- Edition ----------------------------------------------------------------
+edition:
+  window_hours: 24        # "Latest" covers this many hours
+  image_max_width: 480    # Downscale target; tune to the panel
+  embed_images: true
+
+# TOC section order. Each feed maps into one of these via its `section` key.
+sections:
+  - Kotimaa
+  - Maailma
+  - Helsinki
+  - Kulttuuri
+
+feeds:
+  - name: "Yle Tuoreimmat"
+    url: "https://yle.fi/rss/uutiset/tuoreimmat"
+    section: "Kotimaa"
+    max_age_hours: 24
+
+  - name: "HS Politiikka"
+    url: "http://www.hs.fi/rss/politiikka.xml"
+    section: "Kotimaa"
+    max_age_hours: 24
+
+  - name: "HS Pääkirjoitukset"
+    url: "http://www.hs.fi/rss/paakirjoitukset.xml"
+    section: "Kotimaa"
+    max_age_hours: 24
+
+  - name: "HS Maailma"
+    url: "http://www.hs.fi/rss/maailma.xml"
+    section: "Maailma"
+    max_age_hours: 24
+
+  - name: "HS Helsinki"
+    url: "http://www.hs.fi/rss/helsinki.xml"
+    section: "Helsinki"
+    max_age_hours: 24
+
+  - name: "Helsingin kaupunki"
+    url: "https://www.hel.fi/fi/uutiset/rss"
+    section: "Helsinki"
+    max_age_hours: 168
+
+  - name: "Helsingin Uutiset"
+    url: "https://www.helsinginuutiset.fi/uusimmat/"
+    section: "Helsinki"
+    type: "scrape"
+    max_age_hours: 24
+    selector: '//*[@id="sisalto"]'
+    article_selector: './/article'
+    date_selector: './/time[@class="diks-date__published"]'
+    datetime_format: "iso8601"
+
+  - name: "HS Kulttuuri"
+    url: "http://www.hs.fi/rss/kulttuuri.xml"
+    section: "Kulttuuri"
+    max_age_hours: 24
+
+  - name: "HS Lastenuutiset"
+    url: "http://www.hs.fi/rss/lastenuutiset.xml"
+    section: "Kulttuuri"
+    max_age_hours: 24
