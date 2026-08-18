@@ -58,14 +58,15 @@ def group_into_sections(
 
 STYLESHEET = """\
 body { font-family: Georgia, 'Times New Roman', serif; line-height: 1.6;
-       margin: 0; padding: 0.5em; color: #000; background: #fff; }
+       margin: 0; padding: 0.5em; color: #000; background: #fff;
+       text-align: left; }
 h1 { font-size: 1.3em; margin-bottom: 0.2em; }
 h2 { font-size: 1.1em; margin: 0.5em 0; font-weight: bold; }
 h3 { font-size: 1em; margin: 0.4em 0; font-weight: bold; }
 .meta { font-size: 0.85em; color: #555; margin-bottom: 1em;
         border-bottom: 1px solid #ccc; padding-bottom: 0.5em; }
 img { max-width: 100%; height: auto; }
-p { margin: 0.8em 0; }
+p { margin: 0.8em 0; text-align: left; }
 a { color: #000; text-decoration: underline; }
 """
 
