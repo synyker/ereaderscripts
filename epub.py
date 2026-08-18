@@ -168,7 +168,10 @@ def build_edition(
         toc.append((ebooklib_epub.Section(section_name), tuple(chapters)))
 
     book.toc = tuple(toc)
-    book.spine = ["nav"] + spine
+    # The nav document must exist in the book (EPUB 3), but keeping it out of
+    # the spine stops readers from rendering the TOC as the first content page —
+    # the device builds its own TOC from the same data.
+    book.spine = spine
     book.add_item(ebooklib_epub.EpubNcx())
     book.add_item(ebooklib_epub.EpubNav())
 

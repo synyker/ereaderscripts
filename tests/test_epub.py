@@ -269,7 +269,7 @@ def test_shared_image_is_embedded_once_and_referenced_by_both_articles(tmp_path:
     assert f"images/{image_name}" in content_b
 
 
-def test_spine_order_is_nav_masthead_then_articles_in_section_order(tmp_path: Path):
+def test_spine_is_masthead_then_articles_with_no_inline_toc_page(tmp_path: Path):
     groups = [
         ("Kotimaa", [written_article(tmp_path, "a", "Yle Tuoreimmat", "<p>A</p>")]),
         ("Maailma", [written_article(tmp_path, "b", "HS Maailma", "<p>B</p>", hours_ago=2)]),
@@ -280,7 +280,7 @@ def test_spine_order_is_nav_masthead_then_articles_in_section_order(tmp_path: Pa
 
     book = ebooklib_epub.read_epub(str(out))
     idrefs = [idref for idref, _linear in book.spine]
-    assert idrefs == ["nav", "masthead", "article_a", "article_b"]
+    assert idrefs == ["masthead", "article_a", "article_b"]
 
 
 def test_existing_file_is_replaced_atomically(tmp_path: Path):
