@@ -21,6 +21,9 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
+            # mkstemp creates 0600 files and the rename preserves that mode,
+            # which locks the web server out of everything published for it.
+            os.fchmod(f.fileno(), 0o644)
         os.replace(tmp_name, path)
     except BaseException:
         Path(tmp_name).unlink(missing_ok=True)

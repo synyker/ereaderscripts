@@ -2,145 +2,48 @@
 
 Fetch articles from RSS feeds, extract clean content, and read them on an e-reader.
 
-Two delivery paths:
+The primary setup runs on a home server with Docker Compose: articles are bundled
+into a single EPUB edition with topic sections and a nested table of contents,
+published through an OPDS catalog that an **Xteink X4 (CrossPoint firmware)** — or
+any other OPDS client — downloads over Wi-Fi.
 
-- **Xteink X4 (CrossPoint firmware)** — articles are bundled into a single EPUB
-  edition with topic sections and a nested table of contents, published through an
-  OPDS catalog the device browses over Wi-Fi.
-- **Kindle (KOReader)** — articles are synced as individual HTML files over SSH.
+Syncing individual HTML articles to a **Kindle running KOReader** over SSH is also
+supported: see [docs/kindle.md](docs/kindle.md).
 
-## Quick start
+## Quick start (Docker)
 
-```bash
-python -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python init.py          # creates config.yaml, .env and the directories
-$EDITOR config.yaml               # add your feeds and section mapping
-.venv/bin/python fetch_news.py --build-edition
-```
-
-The EPUB and catalog land in `public_dir`. Point the X4 at
-`<public_base_url>/opds.xml` under Settings → System → OPDS Servers.
-
-## Features
-
-- **Multiple feeds**: Configure as many RSS feeds as you want
-- **Clean content extraction**: Uses trafilatura and readability-lxml to remove boilerplate and extract article text
-- **E-ink optimized HTML**: Generates clean, readable HTML files designed for e-ink displays
-- **Per-feed age limits**: Customize how old articles can be for each feed (e.g., 3 days for news, 1 week for local news)
-- **Automatic cleanup**: Remove old articles based on age
-- **EPUB edition**: Bundles recent articles into a single EPUB with topic sections and a nested table of contents
-- **OPDS catalog**: Publishes the edition for wireless download on the Xteink X4 (CrossPoint) and other OPDS clients
-- **Greyscale image processing**: Downscales and converts embedded images for e-ink panels
-- **Docker deployment**: Runs unattended with hourly edition rebuilds
-- **Kindle sync**: Push articles to your Kindle via SSH/SCP (no rsync required)
-- **Article index**: Auto-generates an index.html listing all downloaded articles
-- **Web scraping**: Fetch news from websites without RSS feeds
-
-## Setup
-
-### 1. Install Dependencies
+On the server:
 
 ```bash
-pip install -r requirements.txt
-```
+git clone <this-repo> && cd ereaderscripts
 
-### 2. Configure Feeds
-
-Edit `config.yaml` to add your RSS feeds:
-
-```yaml
-feeds:
-  - name: "Feed Name"
-    url: "https://example.com/feed.rss"
-    limit: 10                    # Max articles to fetch per feed
-    max_age_hours: 72            # Only include articles from last 72 hours (3 days)
-```
-
-**Per-feed age limits:**
-- Local/city news: `168` (1 week)
-- Regular news: `72` (3 days)
-- Breaking news: `24` (1 day)
-
-### 3. Set Up Kindle SSH (Optional, for `--sync`)
-
-The `--sync` flag uses SCP to copy files to your Kindle. SCP is built into SSH and requires no additional tools on the Kindle.
-
-1. **Enable SSH on Kindle:**
-   - Open KOReader menu → Network → SSH server → Start
-   - Note the IP address and port (default: 2222)
-
-2. **Set up key-based authentication (optional, but recommended):**
-   ```bash
-   ssh-copy-id -p 2222 root@<kindle-ip>
-   ```
-   Replace `<kindle-ip>` with your Kindle's IP (e.g., `192.168.1.42`)
-
-3. **Update config.yaml:**
-   ```yaml
-   kindle_host: root@192.168.1.42
-   kindle_news_dir: /mnt/us/koreader/news
-   kindle_ssh_port: 2222                      # KOReader SSH server uses port 2222
-   kindle_ssh_key: ~/.ssh/kindle_id_ed25519   # Optional: path to SSH key
-   ```
-
-## Usage
-
-### Basic Commands
-
-```bash
-# Fetch articles from configured feeds (no sync)
-python fetch_news.py
-
-# Fetch and sync to Kindle
-python fetch_news.py --sync
-
-# Only clean old articles (don't fetch new ones)
-python fetch_news.py --clean-only
-
-# Use custom config file
-python fetch_news.py --config my-config.yaml
-
-# Fetch a single feed by URL
-python fetch_news.py --feed-url "https://example.com/feed.rss"
-
-# Parse a local RSS file
-python fetch_news.py --rss-file /path/to/file.rss
-```
-
-### Scheduling with Crontab
-
-To fetch articles frequently but sync to Kindle only once a day:
-
-```bash
-crontab -e
-```
-
-Add these lines:
-
-```cron
-# Fetch articles every 6 hours (at 0:00, 6:00, 12:00, 18:00)
-0 */6 * * * cd /path/to/ereaderscripts && python fetch_news.py
-
-# Fetch and sync to Kindle at 07:30 every morning
-30 7 * * * cd /path/to/ereaderscripts && python fetch_news.py --sync
-```
-
-This setup:
-- Downloads fresh articles every 6 hours locally
-- Syncs everything to Kindle once a day at 07:30
-- Keeps articles stored locally based on their age limits
-
-## Deploying with Docker
-
-```bash
+# 1. Deployment variables
 cp .env.example .env
 $EDITOR .env                 # EREADER_DATA_DIR and PUBLIC_BASE_URL are required
+
+# 2. Application config
+cp config.example.yaml config.yaml
+$EDITOR config.yaml          # add feeds + sections, and UNCOMMENT the three
+                             # /data/... paths (the ./relative defaults are for
+                             # local runs — inside Docker they end up in the
+                             # container, not in your bind mount)
+
+# 3. Start the scheduler (rebuilds the edition hourly at :17)
 docker compose up -d
+
+# 4. Create the first edition now instead of waiting for the next :17
+docker compose run --rm --entrypoint python ereader-news /app/fetch_news.py --build-edition
 ```
 
-The container rebuilds the edition hourly at :17. Publish it with the nginx snippet
-in [docs/nginx.example.conf](docs/nginx.example.conf), which serves
-`$EREADER_DATA_DIR/public/` directly — there is no upstream to proxy to.
+The EPUB and catalog land in `$EREADER_DATA_DIR/public/` on the host.
+
+### Publish with nginx
+
+Serve that directory directly with the snippet in
+[docs/nginx.example.conf](docs/nginx.example.conf) — there is no upstream to proxy
+to. Mind two classic mistakes: the `alias` must point at the `public/`
+subdirectory and must end with a trailing slash, and every directory in the path
+needs `+x` for the nginx worker user.
 
 Two requirements come from the device's HTTP client:
 
@@ -149,51 +52,15 @@ Two requirements come from the device's HTTP client:
   private-CA certificates fail outright. Let's Encrypt works.
 - **Basic auth, not Digest.** Credentials are sent preemptively on the first
   request. Create the password file with
-  `htpasswd -c /etc/nginx/htpasswd/news <username>`.
+  `sudo htpasswd -c /etc/nginx/.htpasswd-news <username>` (re-run without `-c` to
+  change a password), and reference it from `auth_basic_user_file`.
 
-Syncing to a Kindle instead is manual, since KOReader's SSH server is started by
-hand on the device:
+### Point the device at it
 
-```bash
-docker compose run --rm \
-  -v "${EREADER_SSH_DIR}:/root/.ssh:ro" \
-  --entrypoint python \
-  ereader-news /app/fetch_news.py --sync
-```
-
-## How It Works
-
-1. **Fetch**: Parse RSS feeds and download articles from the last N hours (configurable per feed)
-2. **Extract**: Extract clean article content using trafilatura (with readability fallback)
-3. **Generate**: Create e-ink friendly HTML files organized by feed
-4. **Sync** (optional): Push articles to Kindle using SCP over SSH (no rsync required on Kindle)
-5. **Cleanup**: Automatically remove articles older than the configured age limit
-6. **Index**: Generate an index.html with links to all articles
-7. **Edition** (optional): Build an EPUB from the last 24h of articles, grouped into topic sections with a nested TOC
-8. **Catalog**: Write an OPDS catalog pointing at the EPUB
-9. **Device pull**: The X4 (or another OPDS client) downloads the edition on demand when you open the catalog
-
-## Output Structure
-
-Articles are stored in the configured `output_dir` (default: `./ereader-news/`):
-
-```
-ereader-news/
-├── index.html                    # Article index
-├── Yle_Tuoreimmat/
-│   ├── 20250327_abc123def456.html
-│   └── 20250327_abc123def456.meta
-├── HS_Politiikka/
-│   ├── 20250327_xyz789uvw012.html
-│   └── 20250327_xyz789uvw012.meta
-└── Al_Jazeera/
-    ├── 20250326_foo123bar456.html
-    └── 20250326_foo123bar456.meta
-```
-
-Each article has:
-- `.html`: The actual article content, formatted for e-ink reading
-- `.meta`: Metadata (original URL, title, publication date, fetch timestamp)
+On the X4: Settings → System → OPDS Servers → add
+`<public_base_url>/opds.xml` (e.g. `https://news.example.com/news/opds.xml`) with
+the Basic auth username and password. Sanity-check the same URL first with
+`curl -u <username> <public_base_url>/opds.xml`.
 
 ### How updates reach the device
 
@@ -202,26 +69,70 @@ downloads it when you open the OPDS catalog and select the entry. The title stay
 `News - Latest` on purpose, so each download replaces the previous file on the SD
 card instead of accumulating copies.
 
-## Configuration Reference
+## Running locally (without Docker)
 
-### Global Settings
+For development, or a machine where cron suffices:
 
-```yaml
-output_dir: ./ereader-news             # Where to store articles locally
-max_age_days: 3                        # Cleanup articles older than this (applies to cleanup only)
-max_articles_per_feed: 15              # Default limit per feed if not specified
-kindle_host: root@192.168.1.x          # SSH connection for Kindle (used by --sync)
-kindle_news_dir: /mnt/us/koreader/news # Target directory on Kindle
-kindle_ssh_key: ~/.ssh/id_rsa          # SSH private key (optional, uses default if not specified)
-kindle_ssh_port: 2222                  # SSH port (default: 22, Kindle uses 2222)
+```bash
+python -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python init.py          # creates config.yaml, .env and the directories
+$EDITOR config.yaml               # add your feeds and section mapping
+.venv/bin/python fetch_news.py --build-edition
 ```
+
+Here the relative defaults (`./ereader-news`, `./public`, `./.image-cache`) are
+correct as-is; the EPUB and catalog land in `./public/`.
+
+All CLI flags:
+
+```bash
+python fetch_news.py                  # fetch + clean only
+python fetch_news.py --build-edition  # fetch + build EPUB and OPDS catalog
+python fetch_news.py --sync           # fetch + sync to Kindle (see docs/kindle.md)
+python fetch_news.py --clean-only     # only remove old articles
+python fetch_news.py --config my.yaml # use a different config file
+python fetch_news.py --feed-url URL   # fetch a single feed, ignore config feeds
+python fetch_news.py --rss-file FILE  # parse a local RSS file
+```
+
+## Features
+
+- **Multiple feeds**: Configure as many RSS feeds as you want
+- **Web scraping**: Fetch news from websites without RSS feeds
+- **Clean content extraction**: Uses trafilatura and readability-lxml to remove boilerplate and extract article text
+- **EPUB edition**: Bundles the last 24 hours into a single EPUB with topic sections and a nested table of contents
+- **OPDS catalog**: Publishes the edition for wireless download on the Xteink X4 (CrossPoint) and other OPDS clients
+- **Greyscale image processing**: Downscales and converts embedded images for e-ink panels
+- **Docker deployment**: Runs unattended with hourly edition rebuilds
+- **Per-feed age limits**: Customize how old articles can be for each feed (e.g., 3 days for news, 1 week for local news)
+- **Automatic cleanup**: Remove old articles based on age
+- **Kindle sync**: Push articles as HTML to KOReader via SSH/SCP ([docs/kindle.md](docs/kindle.md))
+
+## How It Works
+
+1. **Fetch**: Parse RSS feeds (or scrape pages) and download articles from the last N hours per feed
+2. **Extract**: Pull clean article content with trafilatura (readability fallback)
+3. **Store**: Save each article as an HTML + metadata pair, deduplicated by URL
+4. **Cleanup**: Remove articles older than the configured age limit
+5. **Edition**: Build an EPUB from the last 24h, grouped into topic sections with a nested TOC, images converted to e-ink greyscale
+6. **Catalog**: Write an OPDS catalog pointing at the EPUB — both written atomically, so a device downloading mid-rebuild never sees a partial file
+7. **Device pull**: The X4 (or another OPDS client) downloads the edition on demand
+
+Articles are stored in `output_dir`, one directory per feed, as
+`<date>_<id>.html` + `.meta` pairs; the edition and `opds.xml` are written to
+`public_dir`.
+
+## Configuration Reference
 
 ### Edition and publishing
 
 ```yaml
-public_dir: /data/public                          # Where the EPUB and catalog are written
+output_dir: ./ereader-news        # Article store (/data/articles in Docker)
+public_dir: ./public              # EPUB + catalog output (/data/public in Docker)
 public_base_url: https://news.example.com/news    # Public URL mapping to public_dir
-image_cache_dir: /data/.image-cache               # Converted image cache
+image_cache_dir: ./.image-cache   # Converted image cache (/data/.image-cache in Docker)
+
+max_age_days: 3                   # Cleanup articles older than this
 
 edition:
   window_hours: 24        # "Latest" covers articles from this many hours
@@ -235,25 +146,29 @@ sections:                 # TOC order; every feed maps into one of these
   - Kulttuuri
 ```
 
-`public_base_url`, `kindle_host` and `kindle_ssh_key` can be overridden by the
-environment variables `PUBLIC_BASE_URL`, `KINDLE_HOST` and `KINDLE_SSH_KEY`, which
-take precedence over the file.
+`public_base_url` can be overridden with the environment variable
+`PUBLIC_BASE_URL`, which takes precedence over the file (the Docker deployment
+sets it from `.env`). The Kindle keys (`kindle_host`, `kindle_ssh_key`, …) are
+documented in [docs/kindle.md](docs/kindle.md).
 
-### Per-feed section
+### Feeds
 
 ```yaml
 feeds:
   - name: "HS Maailma"
     url: "http://www.hs.fi/rss/maailma.xml"
     section: "Maailma"      # Must match an entry in `sections`
+    max_age_hours: 24       # Only include articles from the last N hours
 ```
 
 A feed with no `section` lands in a trailing "Muut" section rather than being
-dropped.
+dropped. Suggested `max_age_hours`: `24` for news, `72` for slower feeds, `168`
+for weekly/city announcements.
 
 ### Scrape feeds
 
-For scrape feeds (no RSS available), you need to specify:
+For sites without RSS:
+
 - `type: "scrape"` - Enables web scraping instead of RSS parsing
 - `selector` - XPath expression to find the HTML element containing articles
   - Example: `//*[@id="sisalto"]` - element with id="sisalto"
@@ -275,23 +190,37 @@ For scrape feeds (no RSS available), you need to specify:
 
 ## Troubleshooting
 
-### Articles not syncing to Kindle
-- Verify SSH server is running on Kindle: Menu → Network → SSH server → Start
-- Test SSH connection: `ssh root@<kindle-ip>`
-- Check that `kindle_host` is correct in config.yaml
+### The catalog URL returns 403
+- The nginx `alias` must point at the `public/` subdirectory and end with a
+  trailing slash: `alias /var/www/ereader-news/public/;`
+- The nginx worker user needs `+x` on every directory in the path — verify with
+  `sudo -u www-data namei /path/to/public/opds.xml`
+- Check the file modes in `public/` are readable by the nginx worker
 
-### Sync failing with "permission denied"
-- Ensure you've run `ssh-copy-id root@<kindle-ip>` once
-- Check that the SSH key has the right permissions: `chmod 600 ~/.ssh/id_rsa`
+### The catalog URL returns 404
+- No edition has been built yet — run the manual build command from the quick
+  start, or wait for the next :17
+- The URL must include `/opds.xml`; the bare directory path is not a catalog
+
+### Wrote files, but they are not in $EREADER_DATA_DIR
+- `config.yaml` still has the relative `./` paths active — inside Docker those
+  resolve to `/app` in the container. Uncomment the `/data/...` values.
+
+### The device shows an empty catalog
+- The X4 shows an empty list (no error) when an entry violates its parser rules;
+  regenerate with the shipped code and check `opds.xml` is intact XML
 
 ### No articles being fetched
 - Check that feeds are properly configured in config.yaml
 - Verify feed URLs are valid by opening them in a browser
-- Check logs for specific error messages
+- Check logs for specific error messages: `docker compose logs -f`
 
 ### Articles deleted too quickly
 - Adjust `max_age_hours` for that feed in config.yaml
 - Or adjust the global `max_age_days` setting (applies during cleanup)
+
+### Kindle sync problems
+See [docs/kindle.md](docs/kindle.md#troubleshooting).
 
 ## License
 

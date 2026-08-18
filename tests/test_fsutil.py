@@ -32,3 +32,12 @@ def test_creates_parent_directories(tmp_path: Path):
     atomic_write_bytes(target, b"data")
 
     assert target.read_bytes() == b"data"
+
+
+def test_written_file_is_world_readable(tmp_path: Path):
+    """mkstemp defaults to 0600; published files must be readable by nginx."""
+    target = tmp_path / "out.bin"
+
+    atomic_write_bytes(target, b"data")
+
+    assert target.stat().st_mode & 0o777 == 0o644
