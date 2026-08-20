@@ -315,7 +315,7 @@ def test_feed_labels_are_appended_to_toc_titles(tmp_path: Path):
     book = ebooklib_epub.read_epub(str(out))
     children = [entry for section in book.toc if isinstance(section, tuple) for entry in section[1]]
     titles = {c.title for c in children}
-    assert "Title a · HS" in titles          # labeled feed gets the suffix
+    assert "HS: Title a" in titles           # labeled feed gets the prefix
     assert "Title b" in titles               # unlabeled feed stays plain
     # the article page's own heading keeps the plain title
     content = book.get_item_with_href("article_a.xhtml").get_content()

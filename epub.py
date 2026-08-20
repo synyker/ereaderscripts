@@ -179,9 +179,10 @@ def build_edition(
                     )
 
             # Sections mix sources, so tag the TOC title with the feed's label
-            # ("Otsikko · HS"). The article page itself already names the feed.
+            # ("HS: Otsikko"). Prefixed, so it survives truncation on narrow
+            # screens. The article page itself already names the feed.
             label = (feed_labels or {}).get(article.feed)
-            toc_title = f"{article.title} · {label}" if label else article.title
+            toc_title = f"{label}: {article.title}" if label else article.title
 
             chapter = _make_document(
                 book,
