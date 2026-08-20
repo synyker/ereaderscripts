@@ -280,7 +280,37 @@ def test_spine_is_masthead_then_articles_with_no_inline_toc_page(tmp_path: Path)
 
     book = ebooklib_epub.read_epub(str(out))
     idrefs = [idref for idref, _linear in book.spine]
-    assert idrefs == ["masthead", "article_a", "article_b"]
+    assert idrefs == ["masthead", "section_0", "article_a", "section_1", "article_b"]
+
+
+def test_section_pages_exist_and_toc_links_to_them(tmp_path: Path):
+    groups = [
+        ("Kotimaa", [written_article(tmp_path, "a", "Yle Tuoreimmat", "<p>A</p>")]),
+        ("Maailma", [written_article(tmp_path, "b", "HS Maailma", "<p>B</p>", hours_ago=2)]),
+    ]
+    out = tmp_path / "news.epub"
+
+    build_edition(groups, out, built_at=BUILT_AT)
+
+    book = ebooklib_epub.read_epub(str(out))
+    section_page = book.get_item_with_href("section_0.xhtml")
+    assert b"Kotimaa" in section_page.get_content()
+    # TOC parents must be links with an href: the device's TOC parsers drop
+    # target-less labels, which flattened the TOC to bare article titles.
+    parents = [entry[0] for entry in book.toc if isinstance(entry, tuple)]
+    assert [p.href for p in parents] == ["section_0.xhtml", "section_1.xhtml"]
+
+
+def test_without_image_cache_img_tags_are_stripped(tmp_path: Path):
+    body = '<p>Before</p><img src="https://example.com/photo.jpg">\n<p>After</p>'
+    groups = [("Kotimaa", [written_article(tmp_path, "a", "Yle Tuoreimmat", body)])]
+    out = tmp_path / "news.epub"
+
+    build_edition(groups, out, built_at=BUILT_AT)  # no image_cache
+
+    content = ebooklib_epub.read_epub(str(out)).get_item_with_href("article_a.xhtml").get_content()
+    assert b"<img" not in content
+    assert b"Before" in content and b"After" in content
 
 
 def test_existing_file_is_replaced_atomically(tmp_path: Path):

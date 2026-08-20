@@ -24,6 +24,27 @@ def make_config(tmp_path: Path) -> dict:
     }
 
 
+def test_edition_limit_keeps_only_the_newest_n_of_a_capped_feed(tmp_path: Path):
+    from articles import Article
+    from fetch_news import apply_edition_limits
+
+    cfg = {"feeds": [{"name": "Chatty", "url": "https://x/1", "edition_limit": 2},
+                     {"name": "Quiet", "url": "https://x/2"}]}
+    articles = [
+        Article(id=f"{i:012d}", url=f"https://example.com/{i}", title=f"T{i}",
+                feed="Chatty" if i < 4 else "Quiet",
+                published=NOW - timedelta(hours=i + 1),
+                path=tmp_path / f"{i}.html")
+        for i in range(5)
+    ]  # newest first, Chatty has 4, Quiet has 1
+
+    kept = apply_edition_limits(articles, cfg)
+
+    chatty = [a.id for a in kept if a.feed == "Chatty"]
+    assert chatty == ["000000000000", "000000000001"]  # the two newest
+    assert sum(a.feed == "Quiet" for a in kept) == 1   # uncapped feed untouched
+
+
 def test_feed_section_map_reads_the_section_key():
     mapping = feed_section_map(make_config(Path("/tmp")))
 

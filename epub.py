@@ -2,6 +2,7 @@
 
 import html as html_lib
 import logging
+import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -82,6 +83,13 @@ MASTHEAD_TEMPLATE = """\
 <p>{summary}</p>
 """
 
+SECTION_TEMPLATE = """\
+<h1>{name}</h1>
+<div class="meta">{count}</div>
+"""
+
+IMG_TAG_RE = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
+
 
 def build_edition(
     groups: list[tuple[str, list[Article]]],
@@ -126,11 +134,30 @@ def build_edition(
     toc = []
     embedded_image_names: set[str] = set()
 
-    for section_name, articles in groups:
+    for index, (section_name, articles) in enumerate(groups):
+        # A real page per section: CrossPoint's TOC parsers only create entries
+        # from links with an href, so a target-less ebooklib Section label is
+        # silently dropped on the device. A section page gives the TOC entry a
+        # target and marks the section boundary while reading.
+        section_page = _make_document(
+            book,
+            style,
+            uid=f"section_{index}",
+            file_name=f"section_{index}.xhtml",
+            title=section_name,
+            content=SECTION_TEMPLATE.format(
+                name=html_lib.escape(section_name),
+                count=f"{len(articles)} artikkelia",
+            ),
+        )
         chapters = []
         for article in articles:
             body = article.body
-            if image_cache is not None:
+            if image_cache is None:
+                # Editions without embedded images shouldn't carry <img> tags
+                # pointing at remote URLs the device can never load.
+                body = IMG_TAG_RE.sub("", body)
+            else:
                 body, embedded = rewrite_images(body, image_cache)
                 for name, data in embedded:
                     # Two articles can share the same wire photo; rewrite_images
@@ -165,8 +192,14 @@ def build_edition(
             )
             chapters.append(chapter)
 
+        spine.append(section_page)
         spine.extend(chapters)
-        toc.append((ebooklib_epub.Section(section_name), tuple(chapters)))
+        toc.append(
+            (
+                ebooklib_epub.Link(section_page.file_name, section_name, f"section_{index}"),
+                tuple(chapters),
+            )
+        )
 
     book.toc = tuple(toc)
     # The nav document must exist in the book (EPUB 3), but keeping it out of

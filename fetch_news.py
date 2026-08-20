@@ -972,6 +972,38 @@ def feed_section_map(cfg: dict) -> dict[str, str]:
     }
 
 
+def apply_edition_limits(articles: list, cfg: dict) -> list:
+    """Cap each feed's articles in the edition to its `edition_limit`, keeping the newest.
+
+    High-churn feeds (Yle Tuoreimmat rotates through dozens of articles a day)
+    otherwise drown out feeds that publish a handful. The cap applies at edition
+    time, not fetch time, because hourly fetching accumulates the full firehose
+    in the store regardless.
+    """
+    limits = {
+        feed["name"]: feed["edition_limit"]
+        for feed in cfg.get("feeds", [])
+        if feed.get("edition_limit")
+    }
+    if not limits:
+        return articles
+
+    counts: dict[str, int] = {}
+    kept = []
+    for article in articles:  # newest first, so the cap keeps the newest
+        seen = counts.get(article.feed, 0)
+        if article.feed in limits and seen >= limits[article.feed]:
+            continue
+        counts[article.feed] = seen + 1
+        kept.append(article)
+
+    dropped = len(articles) - len(kept)
+    if dropped:
+        log.info("Edition limits dropped %d articles (%s)",
+                 dropped, ", ".join(f"{k}={v}" for k, v in limits.items()))
+    return kept
+
+
 def build_edition_from_store(cfg: dict, store: ArticleStore, now: datetime) -> bool:
     """Build the EPUB edition and OPDS catalog. False if there was nothing to publish."""
     edition_cfg = cfg.get("edition", {})
@@ -983,6 +1015,8 @@ def build_edition_from_store(cfg: dict, store: ArticleStore, now: datetime) -> b
             "No articles in the last %dh; keeping the previous edition", window_hours
         )
         return False
+
+    selected = apply_edition_limits(selected, cfg)
 
     groups = group_into_sections(selected, cfg.get("sections", []), feed_section_map(cfg))
 
