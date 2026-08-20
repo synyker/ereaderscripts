@@ -972,6 +972,15 @@ def feed_section_map(cfg: dict) -> dict[str, str]:
     }
 
 
+def feed_label_map(cfg: dict) -> dict[str, str]:
+    """Map each feed's display name to its short TOC label (e.g. "HS")."""
+    return {
+        feed["name"]: feed["label"]
+        for feed in cfg.get("feeds", [])
+        if feed.get("label")
+    }
+
+
 def apply_edition_limits(articles: list, cfg: dict) -> list:
     """Cap each feed's articles in the edition to its `edition_limit`, keeping the newest.
 
@@ -1028,7 +1037,8 @@ def build_edition_from_store(cfg: dict, store: ArticleStore, now: datetime) -> b
 
     public_dir = Path(cfg["public_dir"])
     epub_path = public_dir / "news-latest.epub"
-    build_edition(groups, epub_path, built_at=now, image_cache=image_cache)
+    build_edition(groups, epub_path, built_at=now, image_cache=image_cache,
+                  feed_labels=feed_label_map(cfg))
     log.info(
         "Built %s: %d articles in %d sections", epub_path.name, len(selected), len(groups)
     )

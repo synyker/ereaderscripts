@@ -98,6 +98,7 @@ def build_edition(
     built_at: datetime,
     image_cache: ImageCache | None = None,
     title: str = "News - Latest",
+    feed_labels: dict[str, str] | None = None,
 ) -> Path:
     """Render one EPUB containing every article, grouped into sections.
 
@@ -177,12 +178,17 @@ def build_edition(
                         )
                     )
 
+            # Sections mix sources, so tag the TOC title with the feed's label
+            # ("Otsikko · HS"). The article page itself already names the feed.
+            label = (feed_labels or {}).get(article.feed)
+            toc_title = f"{article.title} · {label}" if label else article.title
+
             chapter = _make_document(
                 book,
                 style,
                 uid=f"article_{article.id}",
                 file_name=f"article_{article.id}.xhtml",
-                title=article.title,
+                title=toc_title,
                 content=ARTICLE_TEMPLATE.format(
                     title=html_lib.escape(article.title),
                     feed=html_lib.escape(article.feed),

@@ -301,6 +301,27 @@ def test_section_pages_exist_and_toc_links_to_them(tmp_path: Path):
     assert [p.href for p in parents] == ["section_0.xhtml", "section_1.xhtml"]
 
 
+def test_feed_labels_are_appended_to_toc_titles(tmp_path: Path):
+    groups = [
+        ("Kotimaa", [
+            written_article(tmp_path, "a", "HS Politiikka", "<p>A</p>"),
+            written_article(tmp_path, "b", "Unlabeled Feed", "<p>B</p>", hours_ago=2),
+        ]),
+    ]
+    out = tmp_path / "news.epub"
+
+    build_edition(groups, out, built_at=BUILT_AT, feed_labels={"HS Politiikka": "HS"})
+
+    book = ebooklib_epub.read_epub(str(out))
+    children = [entry for section in book.toc if isinstance(section, tuple) for entry in section[1]]
+    titles = {c.title for c in children}
+    assert "Title a · HS" in titles          # labeled feed gets the suffix
+    assert "Title b" in titles               # unlabeled feed stays plain
+    # the article page's own heading keeps the plain title
+    content = book.get_item_with_href("article_a.xhtml").get_content()
+    assert b"<h1>Title a</h1>" in content
+
+
 def test_without_image_cache_img_tags_are_stripped(tmp_path: Path):
     body = '<p>Before</p><img src="https://example.com/photo.jpg">\n<p>After</p>'
     groups = [("Kotimaa", [written_article(tmp_path, "a", "Yle Tuoreimmat", body)])]
