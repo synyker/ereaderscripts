@@ -390,6 +390,11 @@ def weather_page(tmp_path: Path, report=None) -> str:
     return item.get_content().decode("utf-8")
 
 
+def weather_text(tmp_path: Path, report=None) -> str:
+    """The page with its non-breaking spaces read as ordinary ones."""
+    return weather_page(tmp_path, report).replace("\u00a0", " ")
+
+
 def test_weather_page_comes_between_the_masthead_and_the_first_section(tmp_path: Path):
     groups = [("Kotimaa", [written_article(tmp_path, "a", "Yle Tuoreimmat", "<p>A</p>")])]
     out = tmp_path / "news.epub"
@@ -438,34 +443,57 @@ def test_weather_page_shows_the_current_conditions(tmp_path: Path):
     assert "lännestä" in content
 
 
-def test_forecast_columns_are_the_coming_hours(tmp_path: Path):
+def test_the_forecast_uses_no_table(tmp_path: Path):
+    """CrossPoint has no table engine: it prints "Tab Row 1, Cell 2: 08" instead."""
     content = weather_page(tmp_path)
 
-    for hour in ("11", "12", "13", "14", "15", "16"):  # 08-13Z in Helsinki
-        assert f"<th>{hour}</th>" in content
+    assert "<table" not in content
+    assert "<td" not in content
+    assert "<th" not in content
+
+
+def test_each_hour_is_one_line_of_its_own(tmp_path: Path):
+    text = weather_text(tmp_path)
+
+    assert "11  13 °C  Ppilv  →3/6 m/s" in text  # 08Z is 11:00 in Helsinki
+    assert "16  18 °C  Selk  →3/8 m/s" in text
+
+
+def test_hours_are_broken_apart_without_paragraph_gaps(tmp_path: Path):
+    """<br/> keeps six hours tight; six <p> blocks would run onto a second page."""
+    forecast = weather_text(tmp_path).split("11  13 °C")[1].split("</p>")[0]
+
+    assert forecast.count("<br/>") == 5
 
 
 def test_forecast_temperatures_are_rounded_to_whole_degrees(tmp_path: Path):
-    content = weather_page(tmp_path)
+    text = weather_text(tmp_path)
 
-    assert "<td>13</td>" in content  # 13.31
-    assert "<td>18</td>" in content  # 18.19
-    assert "13.31" not in content
-
-
-def test_wind_and_gust_share_one_cell(tmp_path: Path):
-    content = weather_page(tmp_path)
-
-    assert "3/6" in content  # 2.8 m/s gusting 5.8
+    assert "13 °C" in text  # 13.31
+    assert "18 °C" in text  # 18.19
+    assert "13.31" not in text
 
 
-def test_wind_cell_holds_its_own_when_the_gust_is_missing(tmp_path: Path):
+def test_wind_and_gust_share_one_reading(tmp_path: Path):
+    assert "→3/6 m/s" in weather_text(tmp_path)  # 2.8 m/s gusting 5.8
+
+
+def test_wind_holds_its_own_when_the_gust_is_missing(tmp_path: Path):
     report = weather_report(hours=[h.__class__(**{**h.__dict__, "wind_gust": None})
                                   for h in weather_report().hours])
-    content = weather_page(tmp_path, report)
+    text = weather_text(tmp_path, report)
 
-    assert "<td>→3</td>" in content
-    assert "3/" not in content
+    assert "→3 m/s" in text
+    assert "3/" not in text
+
+
+def test_dry_hours_leave_the_rainfall_out(tmp_path: Path):
+    """A column of 0.0s is noise when every line has to earn its width."""
+    assert "0.0 mm" not in weather_text(tmp_path)
+
+
+def test_rain_is_named_in_the_hour_it_falls(tmp_path: Path):
+    assert "0.6 mm" in weather_text(tmp_path)  # the 15:00 hour in the fixture
 
 
 def test_the_detail_line_opens_with_a_capital(tmp_path: Path):
@@ -496,12 +524,12 @@ def test_weather_page_carries_no_images(tmp_path: Path):
     assert "<img" not in weather_page(tmp_path)
 
 
-def test_dropped_rows_stay_out_of_the_forecast_table(tmp_path: Path):
-    """Feels-like and humidity were cut to keep the table on one small page."""
-    table = weather_page(tmp_path).split("<table")[1]
+def test_dropped_readings_stay_out_of_the_forecast(tmp_path: Path):
+    """Feels-like and humidity were cut to keep the forecast on one small page."""
+    forecast = weather_text(tmp_path).split("11  13 °C")[1].split("</p>")[0]
 
-    assert "tuntuu" not in table
-    assert "kosteus" not in table
+    assert "tuntuu" not in forecast
+    assert "kosteus" not in forecast.lower()
 
 
 def test_existing_file_is_replaced_atomically(tmp_path: Path):

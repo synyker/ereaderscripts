@@ -76,15 +76,13 @@ h3 { font-size: 1em; margin: 0.4em 0; font-weight: bold; }
 img { max-width: 100%; height: auto; }
 p { margin: 0.8em 0; text-align: left; }
 a { color: #000; text-decoration: underline; }
-.reading { font-size: 1.7em; margin: 0.1em 0; }
-.now { margin: 0.2em 0; }
-.sun { font-size: 0.85em; color: #555; margin-top: 0.8em;
-       border-top: 1px solid #ccc; padding-top: 0.4em; }
-table.forecast { width: 100%; border-collapse: collapse; font-size: 0.85em;
-                 margin: 0.8em 0; table-layout: fixed; }
-table.forecast th, table.forecast td { text-align: center; padding: 0.3em 0.05em;
-                                       border-bottom: 1px solid #ddd; }
-table.forecast th.label { text-align: left; font-weight: normal; color: #555; }
+.reading { font-size: 1.5em; }
+.now { margin: 0.4em 0; line-height: 1.4; }
+/* Monospace lines up the hourly columns wherever CSS is honoured; where it
+   isn't, the non-breaking spaces still keep each hour readable. */
+.forecast { font-family: 'DejaVu Sans Mono', Courier, monospace;
+            margin: 0.6em 0; line-height: 1.5; }
+.sun { font-size: 0.85em; color: #555; margin-top: 0.6em; }
 """
 
 ARTICLE_TEMPLATE = """\
@@ -104,41 +102,54 @@ SECTION_TEMPLATE = """\
 <div class="meta">{count}</div>
 """
 
-WEATHER_TEMPLATE = """\
-<h1>Sää</h1>
-<div class="meta">{place}havainto klo {observed_at}</div>
-{now}
-{table}
-{sun}
-"""
-
 IMG_TAG_RE = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
+
+# CrossPoint on the X4 has no table engine — it prints "Tab Row 1, Cell 2: 08"
+# for every cell — and it ignores the stylesheet, so the page is built from
+# nothing but paragraphs, line breaks and non-breaking spaces. The CSS below
+# still tidies it up on readers that do honour it.
+NBSP = " "
+GAP = NBSP * 2
 
 
 def render_weather(report: WeatherReport) -> str:
-    """One page of weather: what it is now, then the hours ahead.
+    """One page of weather: what it is now, then a line per hour ahead."""
+    place = f"{html_lib.escape(report.place)} · " if report.place else ""
+    blocks = [
+        "<h1>Sää</h1>",
+        f'<div class="meta">{place}havainto klo '
+        f'{report.observation.time.strftime("%-H:%M")}</div>',
+    ]
 
-    The forecast is transposed — hours across, measurements down — because six
-    labelled columns fit a 4" panel where six rows of prose do not.
-    """
-    return WEATHER_TEMPLATE.format(
-        place=f"{html_lib.escape(report.place)} &#183; " if report.place else "",
-        observed_at=report.observation.time.strftime("%-H:%M"),
-        now="\n".join(_current_conditions(report.observation)),
-        table=_forecast_table(report.hours),
-        sun=_sun_line(report),
-    )
+    now = _current_conditions(report.observation)
+    if now:
+        blocks.append(_lines("now", now))
+
+    hours = [_forecast_line(hour) for hour in report.hours]
+    if hours:
+        blocks.append(_lines("forecast", hours))
+
+    sun = _sun_line(report)
+    if sun:
+        blocks.append(sun)
+
+    return "\n".join(blocks) + "\n"
+
+
+def _lines(css_class: str, lines: list[str]) -> str:
+    """One paragraph of hard-broken lines, so the block stays tight."""
+    return f'<p class="{css_class}">' + "<br/>\n".join(lines) + "</p>"
 
 
 def _current_conditions(observation) -> list[str]:
     """The station's own readings, skipping whatever it didn't report."""
     lines = []
     if observation.temperature is not None:
-        lines.append(f'<p class="reading">{observation.temperature:.1f} &#176;C</p>')
+        lines.append(f'<span class="reading">{observation.temperature:.1f} °C</span>')
 
     sky = sky_description(observation.cloud_cover)
     if sky:
-        lines.append(f'<p class="now">{sky.capitalize()}</p>')
+        lines.append(sky.capitalize())
 
     if observation.wind_speed is not None:
         wind = f"Tuuli {observation.wind_speed:.1f} m/s"
@@ -147,21 +158,21 @@ def _current_conditions(observation) -> list[str]:
             wind += f" {direction}"
         if observation.wind_gust is not None:
             wind += f", puuskissa {observation.wind_gust:.1f} m/s"
-        lines.append(f'<p class="now">{wind}</p>')
+        lines.append(wind)
 
     details = []
     if observation.humidity is not None:
         details.append(f"kosteus {observation.humidity:.0f} %")
     if observation.dew_point is not None:
-        details.append(f"kastepiste {observation.dew_point:.1f} &#176;C")
+        details.append(f"kastepiste {observation.dew_point:.1f} °C")
     if observation.pressure is not None:
         details.append(f"paine {observation.pressure:.0f} hPa")
     if observation.visibility is not None:
         details.append(_visibility(observation.visibility))
     if details:
         # Whichever reading survives leads the line, so capitalise after joining.
-        line = " &#183; ".join(details)
-        lines.append(f'<p class="now">{line[0].upper()}{line[1:]}</p>')
+        line = " · ".join(details)
+        lines.append(f"{line[0].upper()}{line[1:]}")
 
     return lines
 
@@ -173,42 +184,33 @@ def _visibility(metres: float) -> str:
     return f"näkyvyys {metres / 1000:.0f} km"
 
 
-def _forecast_table(hours: list) -> str:
-    if not hours:
-        return ""
+def _forecast_line(hour) -> str:
+    """One hour as "11  13 °C  Ppilv  →3/6 m/s", padded with hard spaces.
 
-    def row(label: str, values: list[str]) -> str:
-        cells = "".join(f"<td>{value}</td>" for value in values)
-        return f'<tr><th class="label">{label}</th>{cells}</tr>'
+    Non-breaking spaces hold the gaps open on readers that collapse whitespace
+    and keep each hour on a single line.
+    """
+    fields = [
+        hour.time.strftime("%H"),
+        f"{_round(hour.temperature)}{NBSP}°C",
+        symbol_label(hour.symbol),
+    ]
 
-    headers = "".join(f"<th>{hour.time.strftime('%H')}</th>" for hour in hours)
-    return (
-        '<table class="forecast">\n'
-        f'<tr><th class="label">klo</th>{headers}</tr>\n'
-        + row("sää", [symbol_label(hour.symbol) for hour in hours]) + "\n"
-        + row("&#176;C", [_round(hour.temperature) for hour in hours]) + "\n"
-        + row("m/s", [_wind_cell(hour) for hour in hours]) + "\n"
-        + row("mm", [_millimetres(hour.precipitation) for hour in hours]) + "\n"
-        "</table>"
-    )
+    if hour.wind_speed is not None:
+        wind = f"{wind_arrow(hour.wind_direction)}{round(hour.wind_speed)}"
+        if hour.wind_gust is not None:
+            wind += f"/{round(hour.wind_gust)}"
+        fields.append(f"{wind}{NBSP}m/s")
+
+    # A column of 0.0s is noise; rain earns its place only when it falls.
+    if hour.precipitation:
+        fields.append(f"{hour.precipitation:.1f}{NBSP}mm")
+
+    return GAP.join(fields)
 
 
 def _round(value: float | None) -> str:
     return "-" if value is None else f"{round(value):.0f}"
-
-
-def _millimetres(value: float | None) -> str:
-    return "-" if value is None else f"{value:.1f}"
-
-
-def _wind_cell(hour) -> str:
-    """Wind and gust in one cell, "→3/6", to keep the table six columns wide."""
-    if hour.wind_speed is None:
-        return "-"
-    cell = f"{wind_arrow(hour.wind_direction)}{round(hour.wind_speed)}"
-    if hour.wind_gust is not None:
-        cell += f"/{round(hour.wind_gust)}"
-    return cell
 
 
 def _sun_line(report: WeatherReport) -> str:
@@ -222,7 +224,7 @@ def _sun_line(report: WeatherReport) -> str:
     if report.day_length:
         hours, minutes = divmod(report.day_length, 60)
         length = f"päivän pituus {hours} h {minutes} min"
-        line = f"{line} &#183; {length}" if line else length
+        line = f"{line} · {length}" if line else length
 
     return f'<div class="sun">{line}</div>' if line else ""
 
