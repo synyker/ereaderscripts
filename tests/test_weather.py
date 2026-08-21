@@ -12,8 +12,8 @@ from weather import (
     parse_position,
     parse_series,
     sky_description,
+    direction_letter,
     symbol_label,
-    wind_arrow,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -285,14 +285,27 @@ def test_wind_direction_is_unnamed_when_missing():
     assert direction_name(None) is None
 
 
-def test_wind_arrow_points_the_way_the_wind_is_going():
-    """FMI reports the direction wind comes from; the arrow shows where it heads."""
-    assert wind_arrow(270) == "→"  # from the west, blowing east
-    assert wind_arrow(0) == "↓"  # from the north, blowing south
+def test_direction_letter_abbreviates_the_compass_point():
+    """The X4's font has no arrow glyphs, so directions are English letters."""
+    assert direction_letter(0) == "N"
+    assert direction_letter(90) == "E"
+    assert direction_letter(180) == "S"
+    assert direction_letter(270) == "W"
 
 
-def test_wind_arrow_is_blank_when_direction_is_missing():
-    assert wind_arrow(None) == ""
+def test_direction_letter_covers_the_intercardinal_points():
+    assert direction_letter(45) == "NE"
+    assert direction_letter(135) == "SE"
+    assert direction_letter(225) == "SW"
+    assert direction_letter(315) == "NW"
+
+
+def test_direction_letters_stay_within_two_characters():
+    assert all(len(direction_letter(d)) <= 2 for d in range(0, 360, 5))
+
+
+def test_direction_letter_is_blank_when_direction_is_missing():
+    assert direction_letter(None) == ""
 
 
 # --- Failure handling --------------------------------------------------------

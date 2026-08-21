@@ -15,10 +15,10 @@ from fsutil import atomic_write_bytes
 from images import ImageCache, rewrite_images
 from weather import (
     WeatherReport,
+    direction_letter,
     direction_name,
     sky_description,
     symbol_label,
-    wind_arrow,
 )
 
 log = logging.getLogger(__name__)
@@ -76,7 +76,6 @@ h3 { font-size: 1em; margin: 0.4em 0; font-weight: bold; }
 img { max-width: 100%; height: auto; }
 p { margin: 0.8em 0; text-align: left; }
 a { color: #000; text-decoration: underline; }
-.reading { font-size: 1.5em; }
 .now { margin: 0.4em 0; line-height: 1.4; }
 /* Monospace lines up the hourly columns wherever CSS is honoured; where it
    isn't, the non-breaking spaces still keep each hour readable. */
@@ -113,13 +112,13 @@ GAP = NBSP * 2
 
 
 def render_weather(report: WeatherReport) -> str:
-    """One page of weather: what it is now, then a line per hour ahead."""
-    place = f"{html_lib.escape(report.place)} · " if report.place else ""
-    blocks = [
-        "<h1>Sää</h1>",
-        f'<div class="meta">{place}havainto klo '
-        f'{report.observation.time.strftime("%-H:%M")}</div>',
-    ]
+    """One page of weather: what it is now, then a line per hour ahead.
+
+    Every line is fought for — the whole page has to land on one small screen,
+    so the station goes unnamed (it never changes) and the heading doubles as
+    the timestamp.
+    """
+    blocks = [f'<h1>Sää klo {report.observation.time.strftime("%-H:%M")}</h1>']
 
     now = _current_conditions(report.observation)
     if now:
@@ -144,12 +143,16 @@ def _lines(css_class: str, lines: list[str]) -> str:
 def _current_conditions(observation) -> list[str]:
     """The station's own readings, skipping whatever it didn't report."""
     lines = []
-    if observation.temperature is not None:
-        lines.append(f'<span class="reading">{observation.temperature:.1f} °C</span>')
 
+    # Temperature and sky share the opening line: two short facts, one row.
     sky = sky_description(observation.cloud_cover)
+    opening = []
+    if observation.temperature is not None:
+        opening.append(f"{observation.temperature:.1f} °C")
     if sky:
-        lines.append(sky.capitalize())
+        opening.append(sky if opening else sky.capitalize())
+    if opening:
+        lines.append(", ".join(opening))
 
     if observation.wind_speed is not None:
         wind = f"Tuuli {observation.wind_speed:.1f} m/s"
@@ -197,10 +200,11 @@ def _forecast_line(hour) -> str:
     ]
 
     if hour.wind_speed is not None:
-        wind = f"{wind_arrow(hour.wind_direction)}{round(hour.wind_speed)}"
+        wind = f"{round(hour.wind_speed)}"
         if hour.wind_gust is not None:
             wind += f"/{round(hour.wind_gust)}"
-        fields.append(f"{wind}{NBSP}m/s")
+        letter = direction_letter(hour.wind_direction)
+        fields.append(f"{letter}{NBSP}{wind}{NBSP}m/s" if letter else f"{wind}{NBSP}m/s")
 
     # A column of 0.0s is noise; rain earns its place only when it falls.
     if hour.precipitation:
@@ -214,18 +218,27 @@ def _round(value: float | None) -> str:
 
 
 def _sun_line(report: WeatherReport) -> str:
-    sun = []
-    if report.sunrise:
-        sun.append(f"Aurinko nousee {report.sunrise.strftime('%-H:%M')}")
-    if report.sunset:
-        sun.append(f"laskee {report.sunset.strftime('%-H:%M')}")
-    line = ", ".join(sun)
+    """Sunrise, sunset and day length in one short row.
+
+    Up and down arrows would read better than the word "Aurinko", but they
+    share a Unicode block with the direction arrows the X4 cannot draw.
+    """
+    parts = []
+    if report.sunrise and report.sunset:
+        parts.append(
+            f"Aurinko {report.sunrise.strftime('%-H:%M')}"
+            f"-{report.sunset.strftime('%-H:%M')}"
+        )
+    elif report.sunrise:
+        parts.append(f"Aurinko nousee {report.sunrise.strftime('%-H:%M')}")
+    elif report.sunset:
+        parts.append(f"Aurinko laskee {report.sunset.strftime('%-H:%M')}")
 
     if report.day_length:
         hours, minutes = divmod(report.day_length, 60)
-        length = f"päivän pituus {hours} h {minutes} min"
-        line = f"{line} · {length}" if line else length
+        parts.append(f"{hours}h{minutes}min")
 
+    line = " · ".join(parts)
     return f'<div class="sun">{line}</div>' if line else ""
 
 

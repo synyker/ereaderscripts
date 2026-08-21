@@ -428,19 +428,25 @@ def test_weather_is_the_first_toc_entry(tmp_path: Path):
     assert book.toc[0].href == "weather.xhtml"
 
 
-def test_weather_page_names_the_station_and_the_observation_time(tmp_path: Path):
+def test_the_heading_carries_the_observation_time(tmp_path: Path):
     content = weather_page(tmp_path)
 
-    assert "Helsinki Kumpula" in content
-    assert "7:10" in content  # 04:10Z in Helsinki
+    assert "<h1>Sää klo 7:10</h1>" in content  # 04:10Z in Helsinki
 
 
-def test_weather_page_shows_the_current_conditions(tmp_path: Path):
+def test_the_station_is_not_named_on_the_page(tmp_path: Path):
+    """It never changes, so the reader already knows where the readings are from."""
+    assert "Helsinki Kumpula" not in weather_page(tmp_path)
+
+
+def test_temperature_and_sky_share_the_opening_line(tmp_path: Path):
     content = weather_page(tmp_path)
 
-    assert "12.1" in content
-    assert "Puolipilvistä" in content
-    assert "lännestä" in content
+    assert "12.1 °C, puolipilvistä" in content
+
+
+def test_weather_page_shows_the_current_wind(tmp_path: Path):
+    assert "Tuuli 3.3 m/s lännestä, puuskissa 5.5 m/s" in weather_page(tmp_path)
 
 
 def test_the_forecast_uses_no_table(tmp_path: Path):
@@ -455,8 +461,8 @@ def test_the_forecast_uses_no_table(tmp_path: Path):
 def test_each_hour_is_one_line_of_its_own(tmp_path: Path):
     text = weather_text(tmp_path)
 
-    assert "11  13 °C  Ppilv  →3/6 m/s" in text  # 08Z is 11:00 in Helsinki
-    assert "16  18 °C  Selk  →3/8 m/s" in text
+    assert "11  13 °C  Ppilv  W 3/6 m/s" in text  # 08Z is 11:00 in Helsinki
+    assert "16  18 °C  Selk  W 3/8 m/s" in text
 
 
 def test_hours_are_broken_apart_without_paragraph_gaps(tmp_path: Path):
@@ -475,7 +481,12 @@ def test_forecast_temperatures_are_rounded_to_whole_degrees(tmp_path: Path):
 
 
 def test_wind_and_gust_share_one_reading(tmp_path: Path):
-    assert "→3/6 m/s" in weather_text(tmp_path)  # 2.8 m/s gusting 5.8
+    assert "W 3/6 m/s" in weather_text(tmp_path)  # 2.8 m/s gusting 5.8
+
+
+def test_the_forecast_carries_no_arrow_glyphs(tmp_path: Path):
+    """The X4 draws → and ↑ as an empty box; compass letters always render."""
+    assert not any(arrow in weather_page(tmp_path) for arrow in "→←↑↓↗↘↙↖")
 
 
 def test_wind_holds_its_own_when_the_gust_is_missing(tmp_path: Path):
@@ -483,7 +494,7 @@ def test_wind_holds_its_own_when_the_gust_is_missing(tmp_path: Path):
                                   for h in weather_report().hours])
     text = weather_text(tmp_path, report)
 
-    assert "→3 m/s" in text
+    assert "W 3 m/s" in text
     assert "3/" not in text
 
 
@@ -511,12 +522,9 @@ def test_detail_line_capitalises_whatever_the_station_did_report(tmp_path: Path)
     assert "Kastepiste 10.9" in content
 
 
-def test_weather_page_reports_the_sun(tmp_path: Path):
-    content = weather_page(tmp_path)
-
-    assert "5:47" in content
-    assert "20:57" in content
-    assert "15 h 10 min" in content
+def test_the_sun_line_is_compressed_to_one_short_row(tmp_path: Path):
+    """Every line saved here is what lets the sun share the page with the rest."""
+    assert "Aurinko 5:47-20:57 · 15h10min" in weather_text(tmp_path)
 
 
 def test_weather_page_carries_no_images(tmp_path: Path):

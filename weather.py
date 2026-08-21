@@ -207,8 +207,10 @@ DIRECTION_NAMES = (
     "pohjoisesta", "koillisesta", "idästä", "kaakosta",
     "etelästä", "lounaasta", "lännestä", "luoteesta",
 )
-# Arrows point where the wind is heading, half a compass from where it blows.
-DIRECTION_ARROWS = ("↓", "↙", "←", "↖", "↑", "↗", "→", "↘")
+# The X4's font has no arrow glyphs — it draws them as an empty box — so the
+# forecast names the direction the wind blows from with the English compass
+# abbreviation instead.
+DIRECTION_LETTERS = ("N", "NE", "E", "SE", "S", "SW", "W", "NW")
 
 
 def _sector(degrees: float | None) -> int | None:
@@ -224,9 +226,10 @@ def direction_name(degrees: float | None) -> str | None:
     return None if sector is None else DIRECTION_NAMES[sector]
 
 
-def wind_arrow(degrees: float | None) -> str:
+def direction_letter(degrees: float | None) -> str:
+    """The same direction as `direction_name`, abbreviated for a narrow line."""
     sector = _sector(degrees)
-    return "" if sector is None else DIRECTION_ARROWS[sector]
+    return "" if sector is None else DIRECTION_LETTERS[sector]
 
 
 def sky_description(octas: float | None) -> str | None:
