@@ -461,8 +461,8 @@ def test_the_forecast_uses_no_table(tmp_path: Path):
 def test_each_hour_is_one_line_of_its_own(tmp_path: Path):
     text = weather_text(tmp_path)
 
-    assert "11  13 °C  Ppilv  W 3/6 m/s" in text  # 08Z is 11:00 in Helsinki
-    assert "16  18 °C  Selk  W 3/8 m/s" in text
+    assert "11  13 °C  Ppilv  W 3/6 m/s  0.0 mm" in text  # 08Z is 11:00 in Helsinki
+    assert "16  18 °C  Selk  W 3/8 m/s  0.0 mm" in text
 
 
 def test_hours_are_broken_apart_without_paragraph_gaps(tmp_path: Path):
@@ -498,9 +498,19 @@ def test_wind_holds_its_own_when_the_gust_is_missing(tmp_path: Path):
     assert "3/" not in text
 
 
-def test_dry_hours_leave_the_rainfall_out(tmp_path: Path):
-    """A column of 0.0s is noise when every line has to earn its width."""
-    assert "0.0 mm" not in weather_text(tmp_path)
+def test_every_hour_reports_its_rainfall(tmp_path: Path):
+    """A dry hour must say 0.0, not go quiet — silence reads as missing data."""
+    text = weather_text(tmp_path)
+
+    assert text.count(" mm") == 6
+
+
+def test_an_hour_with_no_rain_figure_at_all_omits_it(tmp_path: Path):
+    """None is unknown, which is not the same claim as 0.0."""
+    report = weather_report(hours=[h.__class__(**{**h.__dict__, "precipitation": None})
+                                   for h in weather_report().hours])
+
+    assert "mm" not in weather_text(tmp_path, report)
 
 
 def test_rain_is_named_in_the_hour_it_falls(tmp_path: Path):

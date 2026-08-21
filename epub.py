@@ -206,8 +206,9 @@ def _forecast_line(hour) -> str:
         letter = direction_letter(hour.wind_direction)
         fields.append(f"{letter}{NBSP}{wind}{NBSP}m/s" if letter else f"{wind}{NBSP}m/s")
 
-    # A column of 0.0s is noise; rain earns its place only when it falls.
-    if hour.precipitation:
+    # Every hour states its rainfall, 0.0 included: a missing figure would read
+    # as "no data" rather than "no rain", and that's the one thing you check.
+    if hour.precipitation is not None:
         fields.append(f"{hour.precipitation:.1f}{NBSP}mm")
 
     return GAP.join(fields)
