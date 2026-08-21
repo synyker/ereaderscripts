@@ -32,6 +32,15 @@ edition:
   image_max_width: 480    # Downscale target; tune to the panel
   embed_images: true
 
+# --- Weather -----------------------------------------------------------------
+# A "Sää" page leads the edition: current conditions from an FMI observation
+# station, then the hours ahead. Station ids: ilmatieteenlaitos.fi/havaintoasemat
+# The forecast follows the station's own coordinates, so fmisid is the only knob.
+weather:
+  enabled: true
+  fmisid: 101004          # Helsinki Kumpula; overridable with $FMI_STATION
+  hours: 6                # Forecast hours to tabulate
+
 # TOC section order. Each feed maps into one of these via its `section` key.
 sections:
   - Kotimaa

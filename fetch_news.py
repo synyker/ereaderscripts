@@ -37,6 +37,7 @@ from articles import ArticleStore
 from epub import build_edition, group_into_sections
 from images import ImageCache
 from opds import CatalogEntry, write_catalog
+from weather import fetch_weather
 
 log_level = logging.DEBUG if os.environ.get("DEBUG") else logging.INFO
 logging.basicConfig(
@@ -47,6 +48,10 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # --- Configuration -----------------------------------------------------------
+
+# Helsinki Kumpula. Any FMI observation station works; find ids at
+# https://www.ilmatieteenlaitos.fi/havaintoasemat
+KUMPULA_FMISID = 101004
 
 DEFAULT_CONFIG = {
     "output_dir": "ereader-news",
@@ -63,8 +68,38 @@ DEFAULT_CONFIG = {
         "image_max_width": 480,
         "embed_images": True,
     },
+    "weather": {
+        "enabled": True,
+        "fmisid": KUMPULA_FMISID,
+        "hours": 6,
+    },
     "feeds": [],
 }
+
+
+def weather_config(cfg: dict) -> dict:
+    """Settings for the Sää page, with $FMI_STATION overriding the config file.
+
+    Read through here rather than off `cfg` directly: load_config merges the
+    defaults shallowly, so a config file that sets only `hours` would otherwise
+    drop the station along with it.
+    """
+    weather = cfg.get("weather") or {}
+    return {
+        "enabled": bool(weather.get("enabled", True)),
+        "fmisid": _station(weather.get("fmisid")),
+        "hours": int(weather.get("hours", 6)),
+    }
+
+
+def _station(configured) -> int:
+    for candidate in (os.environ.get("FMI_STATION"), configured):
+        try:
+            return int(candidate)
+        except (TypeError, ValueError):
+            if candidate:
+                log.warning("Ignoring unusable FMI station id %r", candidate)
+    return KUMPULA_FMISID
 
 
 def load_config(config_path: str) -> dict:
@@ -1035,10 +1070,17 @@ def build_edition_from_store(cfg: dict, store: ArticleStore, now: datetime) -> b
             Path(cfg["image_cache_dir"]), edition_cfg.get("image_max_width", 480)
         )
 
+    weather_cfg = weather_config(cfg)
+    weather = None
+    if weather_cfg["enabled"]:
+        weather = fetch_weather(
+            fmisid=weather_cfg["fmisid"], hours=weather_cfg["hours"], now=now
+        )
+
     public_dir = Path(cfg["public_dir"])
     epub_path = public_dir / "news-latest.epub"
     build_edition(groups, epub_path, built_at=now, image_cache=image_cache,
-                  feed_labels=feed_label_map(cfg))
+                  feed_labels=feed_label_map(cfg), weather=weather)
     log.info(
         "Built %s: %d articles in %d sections", epub_path.name, len(selected), len(groups)
     )

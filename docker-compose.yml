@@ -9,4 +9,6 @@ services:
     environment:
       TZ: ${TZ:-Europe/Helsinki}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?set PUBLIC_BASE_URL in .env}
+      # Unset falls back to the fmisid in config.yaml, then to Kumpula.
+      FMI_STATION: ${FMI_STATION:-}
     restart: unless-stopped

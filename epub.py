@@ -13,6 +13,13 @@ from ebooklib import epub as ebooklib_epub
 from articles import Article
 from fsutil import atomic_write_bytes
 from images import ImageCache, rewrite_images
+from weather import (
+    WeatherReport,
+    direction_name,
+    sky_description,
+    symbol_label,
+    wind_arrow,
+)
 
 log = logging.getLogger(__name__)
 
@@ -69,6 +76,15 @@ h3 { font-size: 1em; margin: 0.4em 0; font-weight: bold; }
 img { max-width: 100%; height: auto; }
 p { margin: 0.8em 0; text-align: left; }
 a { color: #000; text-decoration: underline; }
+.reading { font-size: 1.7em; margin: 0.1em 0; }
+.now { margin: 0.2em 0; }
+.sun { font-size: 0.85em; color: #555; margin-top: 0.8em;
+       border-top: 1px solid #ccc; padding-top: 0.4em; }
+table.forecast { width: 100%; border-collapse: collapse; font-size: 0.85em;
+                 margin: 0.8em 0; table-layout: fixed; }
+table.forecast th, table.forecast td { text-align: center; padding: 0.3em 0.05em;
+                                       border-bottom: 1px solid #ddd; }
+table.forecast th.label { text-align: left; font-weight: normal; color: #555; }
 """
 
 ARTICLE_TEMPLATE = """\
@@ -88,7 +104,127 @@ SECTION_TEMPLATE = """\
 <div class="meta">{count}</div>
 """
 
+WEATHER_TEMPLATE = """\
+<h1>Sää</h1>
+<div class="meta">{place}havainto klo {observed_at}</div>
+{now}
+{table}
+{sun}
+"""
+
 IMG_TAG_RE = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
+
+
+def render_weather(report: WeatherReport) -> str:
+    """One page of weather: what it is now, then the hours ahead.
+
+    The forecast is transposed — hours across, measurements down — because six
+    labelled columns fit a 4" panel where six rows of prose do not.
+    """
+    return WEATHER_TEMPLATE.format(
+        place=f"{html_lib.escape(report.place)} &#183; " if report.place else "",
+        observed_at=report.observation.time.strftime("%-H:%M"),
+        now="\n".join(_current_conditions(report.observation)),
+        table=_forecast_table(report.hours),
+        sun=_sun_line(report),
+    )
+
+
+def _current_conditions(observation) -> list[str]:
+    """The station's own readings, skipping whatever it didn't report."""
+    lines = []
+    if observation.temperature is not None:
+        lines.append(f'<p class="reading">{observation.temperature:.1f} &#176;C</p>')
+
+    sky = sky_description(observation.cloud_cover)
+    if sky:
+        lines.append(f'<p class="now">{sky.capitalize()}</p>')
+
+    if observation.wind_speed is not None:
+        wind = f"Tuuli {observation.wind_speed:.1f} m/s"
+        direction = direction_name(observation.wind_direction)
+        if direction:
+            wind += f" {direction}"
+        if observation.wind_gust is not None:
+            wind += f", puuskissa {observation.wind_gust:.1f} m/s"
+        lines.append(f'<p class="now">{wind}</p>')
+
+    details = []
+    if observation.humidity is not None:
+        details.append(f"kosteus {observation.humidity:.0f} %")
+    if observation.dew_point is not None:
+        details.append(f"kastepiste {observation.dew_point:.1f} &#176;C")
+    if observation.pressure is not None:
+        details.append(f"paine {observation.pressure:.0f} hPa")
+    if observation.visibility is not None:
+        details.append(_visibility(observation.visibility))
+    if details:
+        # Whichever reading survives leads the line, so capitalise after joining.
+        line = " &#183; ".join(details)
+        lines.append(f'<p class="now">{line[0].upper()}{line[1:]}</p>')
+
+    return lines
+
+
+def _visibility(metres: float) -> str:
+    """The station tops out at 50 km, so anything far is reported as a floor."""
+    if metres >= 20000:
+        return "näkyvyys yli 20 km"
+    return f"näkyvyys {metres / 1000:.0f} km"
+
+
+def _forecast_table(hours: list) -> str:
+    if not hours:
+        return ""
+
+    def row(label: str, values: list[str]) -> str:
+        cells = "".join(f"<td>{value}</td>" for value in values)
+        return f'<tr><th class="label">{label}</th>{cells}</tr>'
+
+    headers = "".join(f"<th>{hour.time.strftime('%H')}</th>" for hour in hours)
+    return (
+        '<table class="forecast">\n'
+        f'<tr><th class="label">klo</th>{headers}</tr>\n'
+        + row("sää", [symbol_label(hour.symbol) for hour in hours]) + "\n"
+        + row("&#176;C", [_round(hour.temperature) for hour in hours]) + "\n"
+        + row("m/s", [_wind_cell(hour) for hour in hours]) + "\n"
+        + row("mm", [_millimetres(hour.precipitation) for hour in hours]) + "\n"
+        "</table>"
+    )
+
+
+def _round(value: float | None) -> str:
+    return "-" if value is None else f"{round(value):.0f}"
+
+
+def _millimetres(value: float | None) -> str:
+    return "-" if value is None else f"{value:.1f}"
+
+
+def _wind_cell(hour) -> str:
+    """Wind and gust in one cell, "→3/6", to keep the table six columns wide."""
+    if hour.wind_speed is None:
+        return "-"
+    cell = f"{wind_arrow(hour.wind_direction)}{round(hour.wind_speed)}"
+    if hour.wind_gust is not None:
+        cell += f"/{round(hour.wind_gust)}"
+    return cell
+
+
+def _sun_line(report: WeatherReport) -> str:
+    sun = []
+    if report.sunrise:
+        sun.append(f"Aurinko nousee {report.sunrise.strftime('%-H:%M')}")
+    if report.sunset:
+        sun.append(f"laskee {report.sunset.strftime('%-H:%M')}")
+    line = ", ".join(sun)
+
+    if report.day_length:
+        hours, minutes = divmod(report.day_length, 60)
+        length = f"päivän pituus {hours} h {minutes} min"
+        line = f"{line} &#183; {length}" if line else length
+
+    return f'<div class="sun">{line}</div>' if line else ""
 
 
 def build_edition(
@@ -99,6 +235,7 @@ def build_edition(
     image_cache: ImageCache | None = None,
     title: str = "News - Latest",
     feed_labels: dict[str, str] | None = None,
+    weather: WeatherReport | None = None,
 ) -> Path:
     """Render one EPUB containing every article, grouped into sections.
 
@@ -134,6 +271,20 @@ def build_edition(
     spine = [masthead]
     toc = []
     embedded_image_names: set[str] = set()
+
+    # Weather leads the edition: it's what you check first over coffee, and a
+    # failed FMI fetch simply leaves the page out rather than the whole build.
+    if weather is not None:
+        weather_page = _make_document(
+            book,
+            style,
+            uid="weather",
+            file_name="weather.xhtml",
+            title="Sää",
+            content=render_weather(weather),
+        )
+        spine.append(weather_page)
+        toc.append(ebooklib_epub.Link(weather_page.file_name, "Sää", "weather"))
 
     for index, (section_name, articles) in enumerate(groups):
         # A real page per section: CrossPoint's TOC parsers only create entries

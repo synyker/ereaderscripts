@@ -101,6 +101,7 @@ python fetch_news.py --rss-file FILE  # parse a local RSS file
 - **Web scraping**: Fetch news from websites without RSS feeds
 - **Clean content extraction**: Uses trafilatura and readability-lxml to remove boilerplate and extract article text
 - **EPUB edition**: Bundles the last 24 hours into a single EPUB with topic sections and a nested table of contents
+- **Weather page**: Opens the edition with current conditions and the next hours from an FMI observation station, sized for a small panel
 - **OPDS catalog**: Publishes the edition for wireless download on the Xteink X4 (CrossPoint) and other OPDS clients
 - **Greyscale image processing**: Downscales and converts embedded images for e-ink panels
 - **Docker deployment**: Runs unattended with hourly edition rebuilds
@@ -114,9 +115,10 @@ python fetch_news.py --rss-file FILE  # parse a local RSS file
 2. **Extract**: Pull clean article content with trafilatura (readability fallback)
 3. **Store**: Save each article as an HTML + metadata pair, deduplicated by URL
 4. **Cleanup**: Remove articles older than the configured age limit
-5. **Edition**: Build an EPUB from the last 24h, grouped into topic sections with a nested TOC, images converted to e-ink greyscale
-6. **Catalog**: Write an OPDS catalog pointing at the EPUB — both written atomically, so a device downloading mid-rebuild never sees a partial file
-7. **Device pull**: The X4 (or another OPDS client) downloads the edition on demand
+5. **Weather**: Fetch current conditions, the hourly forecast and the day's sun times from FMI open data
+6. **Edition**: Build an EPUB from the last 24h, led by the weather page and grouped into topic sections with a nested TOC, images converted to e-ink greyscale
+7. **Catalog**: Write an OPDS catalog pointing at the EPUB — both written atomically, so a device downloading mid-rebuild never sees a partial file
+8. **Device pull**: The X4 (or another OPDS client) downloads the edition on demand
 
 Articles are stored in `output_dir`, one directory per feed, as
 `<date>_<id>.html` + `.meta` pairs; the edition and `opds.xml` are written to
@@ -139,12 +141,35 @@ edition:
   image_max_width: 480    # Downscale target in pixels
   embed_images: true      # false ships a text-only edition
 
+weather:
+  enabled: true           # false leaves the Sää page out entirely
+  fmisid: 101004          # FMI observation station (default: Helsinki Kumpula)
+  hours: 6                # Forecast hours tabulated on the page
+
 sections:                 # TOC order; every feed maps into one of these
   - Kotimaa
   - Maailma
   - Helsinki
   - Kulttuuri
 ```
+
+### Weather
+
+The edition opens with a `Sää` page: the station's latest readings, a compact
+table of the coming hours (condition, temperature, wind/gust, rainfall), and
+sunrise, sunset and day length. Data comes from
+[FMI open data](https://en.ilmatieteenlaitos.fi/open-data), which needs no API
+key. Observations come from the station, the hourly forecast from FMI's edited
+model at that station's own coordinates, and gusts from HARMONIE — so `fmisid`
+is the only thing to change to move the page to another town. Station ids are
+listed at [ilmatieteenlaitos.fi/havaintoasemat](https://www.ilmatieteenlaitos.fi/havaintoasemat).
+
+The station can also be set with the environment variable `FMI_STATION`, which
+takes precedence over the file. If FMI is unreachable or answers with nothing
+usable, the page is left out and the edition publishes as normal.
+
+There is no UV row: FMI's open data returns no UV index for any of its point
+forecast models.
 
 `public_base_url` can be overridden with the environment variable
 `PUBLIC_BASE_URL`, which takes precedence over the file (the Docker deployment

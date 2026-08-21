@@ -142,3 +142,134 @@ def test_file_values_used_when_env_unset(tmp_path: Path, monkeypatch):
     assert cfg["public_base_url"] == "https://file.example.com/news"
     assert cfg["kindle_host"] == "root@file-host"
     assert cfg["kindle_ssh_key"] == "/file/ssh/key"
+
+
+# --- Weather -----------------------------------------------------------------
+
+
+def test_weather_defaults_to_the_kumpula_station(monkeypatch):
+    from fetch_news import weather_config
+
+    monkeypatch.delenv("FMI_STATION", raising=False)
+
+    assert weather_config({})["fmisid"] == 101004
+
+
+def test_weather_station_can_be_set_in_config(monkeypatch):
+    from fetch_news import weather_config
+
+    monkeypatch.delenv("FMI_STATION", raising=False)
+
+    assert weather_config({"weather": {"fmisid": 100971}})["fmisid"] == 100971
+
+
+def test_fmi_station_env_var_overrides_the_configured_station(monkeypatch):
+    from fetch_news import weather_config
+
+    monkeypatch.setenv("FMI_STATION", "100971")
+
+    assert weather_config({"weather": {"fmisid": 101004}})["fmisid"] == 100971
+
+
+def test_an_unreadable_station_env_var_falls_back_to_kumpula(monkeypatch):
+    from fetch_news import weather_config
+
+    monkeypatch.setenv("FMI_STATION", "Kumpula please")
+
+    assert weather_config({})["fmisid"] == 101004
+
+
+def test_weather_is_on_by_default(monkeypatch):
+    from fetch_news import weather_config
+
+    monkeypatch.delenv("FMI_STATION", raising=False)
+
+    assert weather_config({})["enabled"] is True
+    assert weather_config({})["hours"] == 6
+
+
+def test_weather_can_be_turned_off(monkeypatch):
+    from fetch_news import weather_config
+
+    monkeypatch.delenv("FMI_STATION", raising=False)
+
+    assert weather_config({"weather": {"enabled": False}})["enabled"] is False
+
+
+def stored_article(tmp_path: Path, store: ArticleStore) -> None:
+    store.save(
+        article_id="aaaaaaaaaaaa",
+        url="https://example.com/a",
+        title="Otsikko",
+        feed="Yle Tuoreimmat",
+        published=NOW - timedelta(hours=1),
+        html="<html><body><article><p>Sisalto</p></article></body></html>",
+    )
+
+
+def test_the_edition_carries_a_weather_page_when_fmi_answers(tmp_path: Path, monkeypatch):
+    import ebooklib.epub as ebooklib_epub
+
+    import fetch_news
+    from tests.test_epub import weather_report
+
+    cfg = make_config(tmp_path)
+    store = ArticleStore(Path(cfg["output_dir"]))
+    stored_article(tmp_path, store)
+    monkeypatch.setattr(fetch_news, "fetch_weather", lambda **kwargs: weather_report())
+
+    assert build_edition_from_store(cfg, store, now=NOW) is True
+
+    book = ebooklib_epub.read_epub(str(Path(cfg["public_dir"]) / "news-latest.epub"))
+    assert book.get_item_with_href("weather.xhtml") is not None
+
+
+def test_the_edition_still_publishes_when_fmi_is_down(tmp_path: Path, monkeypatch):
+    import ebooklib.epub as ebooklib_epub
+
+    import fetch_news
+
+    cfg = make_config(tmp_path)
+    store = ArticleStore(Path(cfg["output_dir"]))
+    stored_article(tmp_path, store)
+    monkeypatch.setattr(fetch_news, "fetch_weather", lambda **kwargs: None)
+
+    assert build_edition_from_store(cfg, store, now=NOW) is True
+
+    book = ebooklib_epub.read_epub(str(Path(cfg["public_dir"]) / "news-latest.epub"))
+    assert book.get_item_with_href("weather.xhtml") is None
+
+
+def test_fmi_is_left_alone_when_weather_is_switched_off(tmp_path: Path, monkeypatch):
+    import fetch_news
+
+    cfg = {**make_config(tmp_path), "weather": {"enabled": False}}
+    store = ArticleStore(Path(cfg["output_dir"]))
+    stored_article(tmp_path, store)
+
+    def refuse(**kwargs):
+        raise AssertionError("weather is off; FMI should not be queried")
+
+    monkeypatch.setattr(fetch_news, "fetch_weather", refuse)
+
+    assert build_edition_from_store(cfg, store, now=NOW) is True
+
+
+def test_the_configured_station_and_window_reach_fmi(tmp_path: Path, monkeypatch):
+    import fetch_news
+
+    cfg = {**make_config(tmp_path), "weather": {"fmisid": 100971, "hours": 4}}
+    store = ArticleStore(Path(cfg["output_dir"]))
+    stored_article(tmp_path, store)
+    monkeypatch.delenv("FMI_STATION", raising=False)
+    seen: dict = {}
+
+    def record(**kwargs):
+        seen.update(kwargs)
+        return None
+
+    monkeypatch.setattr(fetch_news, "fetch_weather", record)
+    build_edition_from_store(cfg, store, now=NOW)
+
+    assert seen["fmisid"] == 100971
+    assert seen["hours"] == 4

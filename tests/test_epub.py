@@ -5,7 +5,7 @@ import ebooklib
 from ebooklib import epub as ebooklib_epub
 
 from articles import Article
-from epub import build_edition, group_into_sections
+from epub import HELSINKI, build_edition, group_into_sections
 from images import ImageCache
 
 NOW = datetime(2026, 8, 5, 12, 0, tzinfo=timezone.utc)
@@ -332,6 +332,176 @@ def test_without_image_cache_img_tags_are_stripped(tmp_path: Path):
     content = ebooklib_epub.read_epub(str(out)).get_item_with_href("article_a.xhtml").get_content()
     assert b"<img" not in content
     assert b"Before" in content and b"After" in content
+
+
+# --- Weather page ------------------------------------------------------------
+
+
+def weather_report(**overrides):
+    from weather import ForecastHour, Observation, WeatherReport
+
+    def hour(offset: int, temperature: float, gust: float | None, symbol: int, rain: float = 0.0):
+        return ForecastHour(
+            time=datetime(2026, 8, 21, 8 + offset, tzinfo=timezone.utc).astimezone(HELSINKI),
+            temperature=temperature,
+            wind_speed=2.8,
+            wind_gust=gust,
+            wind_direction=270.0,
+            precipitation=rain,
+            symbol=symbol,
+        )
+
+    defaults = dict(
+        place="Helsinki Kumpula",
+        observation=Observation(
+            time=datetime(2026, 8, 21, 4, 10, tzinfo=timezone.utc).astimezone(HELSINKI),
+            temperature=12.1,
+            dew_point=10.9,
+            humidity=93.0,
+            wind_speed=3.3,
+            wind_gust=5.5,
+            wind_direction=292.0,
+            pressure=1003.8,
+            cloud_cover=5.0,
+            visibility=50000.0,
+        ),
+        hours=[
+            hour(0, 13.31, 5.8, 4),
+            hour(1, 14.7, 5.6, 4),
+            hour(2, 15.84, 5.3, 2),
+            hour(3, 17.04, 5.7, 1),
+            hour(4, 17.74, 7.6, 1, rain=0.6),
+            hour(5, 18.19, 8.5, 1),
+        ],
+        sunrise=datetime(2026, 8, 21, 2, 47, 43, tzinfo=timezone.utc).astimezone(HELSINKI),
+        sunset=datetime(2026, 8, 21, 17, 57, 14, tzinfo=timezone.utc).astimezone(HELSINKI),
+        day_length=910,
+    )
+    return WeatherReport(**{**defaults, **overrides})
+
+
+def weather_page(tmp_path: Path, report=None) -> str:
+    groups = [("Kotimaa", [written_article(tmp_path, "a", "Yle Tuoreimmat", "<p>A</p>")])]
+    out = tmp_path / "news.epub"
+
+    build_edition(groups, out, built_at=BUILT_AT, weather=report or weather_report())
+
+    item = ebooklib_epub.read_epub(str(out)).get_item_with_href("weather.xhtml")
+    return item.get_content().decode("utf-8")
+
+
+def test_weather_page_comes_between_the_masthead_and_the_first_section(tmp_path: Path):
+    groups = [("Kotimaa", [written_article(tmp_path, "a", "Yle Tuoreimmat", "<p>A</p>")])]
+    out = tmp_path / "news.epub"
+
+    build_edition(groups, out, built_at=BUILT_AT, weather=weather_report())
+
+    book = ebooklib_epub.read_epub(str(out))
+    idrefs = [idref for idref, _linear in book.spine]
+    assert idrefs == ["masthead", "weather", "section_0", "article_a"]
+
+
+def test_no_weather_page_when_fmi_gave_us_nothing(tmp_path: Path):
+    groups = [("Kotimaa", [written_article(tmp_path, "a", "Yle Tuoreimmat", "<p>A</p>")])]
+    out = tmp_path / "news.epub"
+
+    build_edition(groups, out, built_at=BUILT_AT, weather=None)
+
+    book = ebooklib_epub.read_epub(str(out))
+    assert book.get_item_with_href("weather.xhtml") is None
+    assert [idref for idref, _linear in book.spine] == ["masthead", "section_0", "article_a"]
+
+
+def test_weather_is_the_first_toc_entry(tmp_path: Path):
+    groups = [("Kotimaa", [written_article(tmp_path, "a", "Yle Tuoreimmat", "<p>A</p>")])]
+    out = tmp_path / "news.epub"
+
+    build_edition(groups, out, built_at=BUILT_AT, weather=weather_report())
+
+    book = ebooklib_epub.read_epub(str(out))
+    assert book.toc[0].title == "Sää"
+    assert book.toc[0].href == "weather.xhtml"
+
+
+def test_weather_page_names_the_station_and_the_observation_time(tmp_path: Path):
+    content = weather_page(tmp_path)
+
+    assert "Helsinki Kumpula" in content
+    assert "7:10" in content  # 04:10Z in Helsinki
+
+
+def test_weather_page_shows_the_current_conditions(tmp_path: Path):
+    content = weather_page(tmp_path)
+
+    assert "12.1" in content
+    assert "Puolipilvistä" in content
+    assert "lännestä" in content
+
+
+def test_forecast_columns_are_the_coming_hours(tmp_path: Path):
+    content = weather_page(tmp_path)
+
+    for hour in ("11", "12", "13", "14", "15", "16"):  # 08-13Z in Helsinki
+        assert f"<th>{hour}</th>" in content
+
+
+def test_forecast_temperatures_are_rounded_to_whole_degrees(tmp_path: Path):
+    content = weather_page(tmp_path)
+
+    assert "<td>13</td>" in content  # 13.31
+    assert "<td>18</td>" in content  # 18.19
+    assert "13.31" not in content
+
+
+def test_wind_and_gust_share_one_cell(tmp_path: Path):
+    content = weather_page(tmp_path)
+
+    assert "3/6" in content  # 2.8 m/s gusting 5.8
+
+
+def test_wind_cell_holds_its_own_when_the_gust_is_missing(tmp_path: Path):
+    report = weather_report(hours=[h.__class__(**{**h.__dict__, "wind_gust": None})
+                                  for h in weather_report().hours])
+    content = weather_page(tmp_path, report)
+
+    assert "<td>→3</td>" in content
+    assert "3/" not in content
+
+
+def test_the_detail_line_opens_with_a_capital(tmp_path: Path):
+    content = weather_page(tmp_path)
+
+    assert "Kosteus 93 %" in content
+
+
+def test_detail_line_capitalises_whatever_the_station_did_report(tmp_path: Path):
+    """Humidity is often missing; the line still shouldn't start lowercase."""
+    bare = weather_report()
+    observation = bare.observation.__class__(**{**bare.observation.__dict__, "humidity": None})
+    content = weather_page(tmp_path, weather_report(observation=observation))
+
+    assert "Kastepiste 10.9" in content
+
+
+def test_weather_page_reports_the_sun(tmp_path: Path):
+    content = weather_page(tmp_path)
+
+    assert "5:47" in content
+    assert "20:57" in content
+    assert "15 h 10 min" in content
+
+
+def test_weather_page_carries_no_images(tmp_path: Path):
+    """The X4 renders a text table far more reliably than icon art."""
+    assert "<img" not in weather_page(tmp_path)
+
+
+def test_dropped_rows_stay_out_of_the_forecast_table(tmp_path: Path):
+    """Feels-like and humidity were cut to keep the table on one small page."""
+    table = weather_page(tmp_path).split("<table")[1]
+
+    assert "tuntuu" not in table
+    assert "kosteus" not in table
 
 
 def test_existing_file_is_replaced_atomically(tmp_path: Path):
